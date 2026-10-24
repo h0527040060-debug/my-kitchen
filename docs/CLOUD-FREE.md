@@ -87,6 +87,8 @@ AI_DAILY_MAX_CALLS נשאר 0 ואין מפתח OpenAI ב־Blueprint. הפעלת
 
 ## מה הוכן ומה עדיין לא אומת
 
-הוכן Blueprint חינמי, אתחול בעלים ללא Shell, מנהל תהליכים ל־API ול־worker, בדיקת אחסון חיצוני מחייבת, TLS למסד ומגבלות מדיה התואמות לפרופיל. פרויקט Supabase הייעודי, הרשאת המאגר וחשבון Render עדיין דרושים לפריסה. בדיקות תהליך ויחידה מקומיות אינן בדיקה חיה של השירותים. לא פורסמה כתובת חיה ולא בוצע חיוב.
+הוכן Blueprint חינמי, אתחול בעלים ללא Shell, מנהל תהליכים ל־API ול־worker, בדיקת אחסון חיצוני מחייבת, TLS למסד ומגבלות מדיה התואמות לפרופיל. הקוד ו־render.yaml הועלו ל־[מאגר GitHub](https://github.com/h0527040060-debug/my-kitchen) בענף main, והבדיקות עברו גם ב־GitHub Actions. המאגר ציבורי לפי בחירת הבעלים; אין בו סודות או נתוני שימוש.
+
+Render מופיע כתוסף מותקן ומופעל, אך כלי ניהול החשבון טרם זמינים בשיחה הנוכחית. פרויקט Supabase הייעודי שהבעלים יכין עדיין אינו מופיע בחיבורים. אלה החיבורים החסרים לפריסה חיה; לא פורסמה כתובת אפליקציה ולא בוצע חיוב.
 
 מקורות שנבדקו: [Render Free](https://render.com/docs/free), [Blueprint specification](https://render.com/docs/blueprint-spec), [Supabase S3 authentication](https://supabase.com/docs/guides/storage/s3/authentication), [חיבור PostgreSQL](https://supabase.com/docs/guides/database/connecting-to-postgres), [מכסות Supabase](https://supabase.com/docs/guides/platform/billing-on-supabase).

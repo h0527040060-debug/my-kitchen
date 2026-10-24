@@ -4,7 +4,7 @@
 
 GitHub Free מאפשר מאגרי קוד פרטיים ללא הגבלה, ולכן אין צורך לשדרג כדי לשמור את קוד האפליקציה במאגר פרטי. המכסה המתועדת לחשבון אישי כוללת 2,000 דקות Actions בחודש. GitHub Pages הוא אירוח סטטי: הוא אינו מפעיל שרת Node, מסד או worker עם FFmpeg. תמונות המתכונים והמפתחות אינם מיועדים לשמירה ב־Git.
 
-יצירת המאגר דרך ההרשאה המחוברת נכשלה עם `Resource not accessible by integration`. הקוד נשמר מקומית ב־Git; לא נוצר מאגר מרוחק. אפשר ליצור בעתיד מאגר פרטי ריק בחשבון ולחבר אליו את המקורות.
+יצירת המאגר דרך ההרשאה המחוברת נכשלה בעבר עם `Resource not accessible by integration`. לאחר שהבעלים יצר את המאגר, הקוד הועלה ל־[my-kitchen](https://github.com/h0527040060-debug/my-kitchen), בענף main. הבעלים בחר במפורש להשאיר את קוד האפליקציה ציבורי; נתוני המתכונים, המדיה והמפתחות נשארים פרטיים ומחוץ ל־Git. בדיקות GitHub Actions עברו בענן.
 
 מקור: [GitHub plans](https://docs.github.com/en/get-started/learning-about-github/githubs-plans).
 
