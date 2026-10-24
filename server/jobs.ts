@@ -97,7 +97,7 @@ export async function runOne(handler: (job: any) => Promise<unknown>) {
       );
     if (job.operation === "extractRecipe")
       await db.query(
-        "update kitchen.import_items set status=$2,error=$3,updated_at=now() where id=$1 and status<>'saved'",
+        "update kitchen.import_items set status=$2,error=$3,updated_at=now() where id=$1 and status not in('saved','merged','trash') and scan_generation=coalesce($4,1)",
         [
           job.payload.item_id,
           status === "blocked"
@@ -106,6 +106,7 @@ export async function runOne(handler: (job: any) => Promise<unknown>) {
               ? "queued"
               : "failed",
           err.message.slice(0, 1200),
+          job.payload.generation ?? 1,
         ],
       );
   } finally {

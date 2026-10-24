@@ -1443,3 +1443,6 @@
 .k-compare-value {
   overflow-wrap: anywhere;
 }
+
+.k-card-select {display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 14px;}
+.k-card-select input {width:22px;height:22px;}

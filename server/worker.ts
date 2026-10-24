@@ -27,12 +27,12 @@ export async function handleJob(
     ).rows[0];
     if (
       !item ||
-      ["saved", "merged"].includes(item.status) ||
+      ["saved", "merged", "trash"].includes(item.status) ||
       item.scan_generation !== (p.generation ?? 1)
     )
       return { skipped: true };
     const locked = await db.query(
-      "update kitchen.import_items set status='processing',error=null where id=$1 and status not in ('saved','merged') and scan_generation=$2 returning id",
+      "update kitchen.import_items set status='processing',error=null where id=$1 and status not in ('saved','merged','trash') and scan_generation=$2 returning id",
       [item.id, p.generation ?? 1],
     );
     if (!locked.rows.length) return { skipped: true };
@@ -63,7 +63,7 @@ export async function handleJob(
       ).rows[0];
       if (
         !current ||
-        ["saved", "merged"].includes(current.status) ||
+        ["saved", "merged", "trash"].includes(current.status) ||
         current.scan_generation !== (p.generation ?? 1)
       )
         return { skipped: true };
@@ -132,7 +132,7 @@ export async function handleJob(
     if (similar.length)
       suggestions = { ...suggestions, possible_duplicates: similar };
     await db.query(
-      "update kitchen.import_items set suggestions=$2::jsonb||(case when suggestions?'manual_paths' then jsonb_build_object('manual_paths',suggestions->'manual_paths') else '{}'::jsonb end),updated_at=now() where id=$1 and status not in ('saved','merged')",
+      "update kitchen.import_items set suggestions=$2::jsonb||(case when suggestions?'manual_paths' then jsonb_build_object('manual_paths',suggestions->'manual_paths') else '{}'::jsonb end),updated_at=now() where id=$1 and status not in ('saved','merged','trash')",
       [item.id, JSON.stringify(suggestions)],
     );
     return { item_id: item.id, ...checkpoint };

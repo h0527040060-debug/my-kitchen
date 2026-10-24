@@ -60,10 +60,14 @@ try {
   if (reset) {
     const hash = await passwordHash(password);
     await transaction(async (tx) => {
-      await tx.query("update kitchen.owner set password_hash=$1 where id=1", [
-        hash,
-      ]);
+      await tx.query(
+        "update kitchen.owner set password_hash=$1,recovery_hashes='{}' where id=1",
+        [hash],
+      );
       await tx.query("delete from kitchen.sessions");
+      await tx.query(
+        "update kitchen.chat_import_grants set revoked=true where not revoked",
+      );
     });
     console.log(
       "סיסמת הבעלים עודכנה וכל ההתחברויות הקודמות בוטלו. הנתונים נשמרו.",

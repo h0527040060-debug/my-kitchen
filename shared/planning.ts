@@ -36,7 +36,9 @@ export function shoppingForRecipes(
 ): ShoppingLine[] {
   const result: ShoppingLine[] = [];
   for (const item of items) {
-    const scaled = scaleRecipe(item.content, item.target);
+    const scaled = item.target
+      ? scaleRecipe(item.content, item.target)
+      : item.content;
     for (const original of scaled.ingredients) {
       const i = selectedIngredient(original),
         canonical = convertMeasurement(
@@ -168,7 +170,10 @@ export function preparationPlan(
     available[k] = Array(Math.max(1, n)).fill(0);
   const finish = new Map<string, number>();
   const pending = items.flatMap((item) =>
-    scaleRecipe(item.content, item.target).steps.map((s) => ({
+    (item.target
+      ? scaleRecipe(item.content, item.target)
+      : item.content
+    ).steps.map((s) => ({
       item,
       step: s,
       key: `${item.id}:${s.id}`,

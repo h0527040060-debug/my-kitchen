@@ -937,7 +937,7 @@ export function RecipeEditor({
         content,
         status,
         category_ids: categories,
-        confirm_categories: categories.length > 0,
+        confirm_categories: true,
         measurement_config: measurements,
       },
     );
@@ -1018,11 +1018,11 @@ export function RecipeEditor({
       <CategoryPicker selected={categories} onChange={setCategories} />
       {(issues.length > 0 || !categories.length) && (
         <details className="k-note">
-          <summary>מה חסר לאישור?</summary>
+          <summary>פרטים שאפשר להשלים בהמשך — אינם מעכבים שמירה</summary>
           <ul>
             {[
               ...issues,
-              ...(!categories.length ? ["יש לבחור ולאשר קטגוריה"] : []),
+              ...(!categories.length ? ["המתכון יישמר ללא קטגוריה"] : []),
             ].map((s, i) => (
               <li key={i}>{s}</li>
             ))}

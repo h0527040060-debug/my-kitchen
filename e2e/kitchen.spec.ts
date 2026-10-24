@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import sharp from "sharp";
 import { spawn, type ChildProcess } from "node:child_process";
+import { recipe } from "../tests/fixture.ts";
 let worker: ChildProcess;
 let recipeId = "";
 const title = "בדיקת נייד סינתטית — לחם הבית עם כותרת עברית ארוכה במיוחד";
@@ -168,16 +169,40 @@ test("unverified browser cannot access media or charge AI", async ({
   ).toBeVisible();
   await context.close();
 });
-test("mobile validation errors stay visible inside the open editor instead of reporting a false save", async ({
+test("a real concurrent edit stays visible in the mobile editor and cannot overwrite the newer revision", async ({
   page,
 }) => {
-  await page.getByRole("button", { name: "מתכון חדש", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "מתכון חדש" });
+  const original = recipe();
+  original.title = "בדיקת התנגשות סינתטית";
+  const created = await (
+    await page.request.post("/api/recipes", {
+      data: {
+        content: original,
+        status: "published",
+        category_ids: [],
+        confirm_categories: true,
+      },
+    })
+  ).json();
+  await page.goto("/#/recipes/" + created.id);
+  await page.getByRole("button", { name: "עריכה", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "עריכת מתכון" });
+  await expect(dialog).toBeVisible();
+  const newer = await page.request.put("/api/recipes/" + created.id, {
+    data: {
+      content: { ...original, notes: "תיקון ממכשיר שני" },
+      revision: created.revision,
+      status: "published",
+      category_ids: [],
+      confirm_categories: true,
+    },
+  });
+  expect(newer.ok()).toBe(true);
   await dialog
     .getByRole("button", { name: "אישור ושמירת מתכון", exact: true })
     .click();
   await expect(dialog.getByRole("status")).toContainText(
-    "המתכון דורש השלמה לפני אישור",
+    "המתכון השתנה במכשיר אחר",
   );
   await expect(dialog).toBeVisible();
   expect(

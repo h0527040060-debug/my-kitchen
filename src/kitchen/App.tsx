@@ -24,6 +24,7 @@ import {
 } from "./plans.tsx";
 import { More } from "./more.tsx";
 import "./kitchen.css";
+import { AccountRecovery } from "./account.tsx";
 export default function KitchenApp() {
   const [session, setSession] = useState<any>(null),
     [ready, setReady] = useState(false),
@@ -162,6 +163,7 @@ function Login({
 }) {
   const { run, busy } = useAction();
   const [error, setError] = useState("");
+  const [recover, setRecover] = useState(false);
   return (
     <section className="k-login">
       <ChefHat size={54} strokeWidth={1} />
@@ -219,6 +221,15 @@ function Login({
           {busy ? "מתחברים…" : "כניסה למטבח שלי"}
         </button>
       </form>
+      <button className="button outline" onClick={() => setRecover(true)}>
+        שכחתי סיסמה
+      </button>
+      {recover && (
+        <AccountRecovery
+          close={() => setRecover(false)}
+          connected={connected}
+        />
+      )}
       <p className="k-note">
         חשבון בעלים יחיד, זמין מהמכשירים שלך. בהפעלה הראשונה יוצרים את החשבון עם
         הוראות ההתקנה המצורפות.

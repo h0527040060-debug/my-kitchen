@@ -8,6 +8,7 @@ import {
   LoadState,
   MediaImage,
   Dialog,
+  Confirm,
 } from "./ui.tsx";
 import { ContentEditor } from "./editor.tsx";
 import { amountText } from "../../shared/quantities.ts";
@@ -22,9 +23,14 @@ const statuses: Record<string, string> = {
   ready: "מוכן לאישור",
   saved: "נשמר",
   failed: "נכשל",
+  trash: "בסל המחזור",
 };
 export function Imports() {
-  const { data, error, loading, reload } = useResource<any>("/imports", 4000);
+  const [collection, setCollection] = useState("pending");
+  const { data, error, loading, reload } = useResource<any>(
+    "/imports?view=" + collection,
+    4000,
+  );
   const settings = useResource<any>("/settings");
   const limits = settings.data?.limits;
   const { run, busy, notify } = useAction();
@@ -36,8 +42,20 @@ export function Imports() {
     [paths, setPaths] = useState<Record<string, string>>({}),
     [preview, setPreview] = useState<any>(null),
     [offset, setOffset] = useState(0);
+  const [versions, setVersions] = useState<Record<string, any>>({});
+  const [remove, setRemove] = useState<{
+    selection: any[];
+    restore: boolean;
+  } | null>(null);
+  const [progress, setProgress] = useState("");
+  const snapshot = (item: any) => ({
+    id: item.id,
+    revision: item.revision,
+    recipe_revision: item.recipe_revision,
+  });
+  const selection = selected.map((id) => versions[id]).filter(Boolean);
   const page = useResource<any>(
-    offset ? "/imports?offset=" + offset : null,
+    offset ? "/imports?view=" + collection + "&offset=" + offset : null,
     4000,
   );
   const view = offset ? page.data : data;
@@ -194,9 +212,71 @@ export function Imports() {
           ))}
       </div>
       <div className="k-actions">
+        <label>
+          תצוגה
+          <select
+            aria-label="תצוגת תור הייבוא"
+            value={collection}
+            onChange={(e) => {
+              setCollection(e.target.value);
+              setOffset(0);
+              setSelected([]);
+              setPreview(null);
+            }}
+          >
+            <option value="pending">ממתינים לשמירה</option>
+            <option value="saved">נשמרו במאגר</option>
+            <option value="trash">סל מחזור</option>
+          </select>
+        </label>
         <button
           className="button outline"
-          disabled={busy || selected.length < 2}
+          disabled={busy}
+          onClick={() =>
+            void run(async () => {
+              const result = await api("/imports/selection?view=" + collection);
+              setVersions(
+                Object.fromEntries(result.items.map((i: any) => [i.id, i])),
+              );
+              setSelected(result.items.map((i: any) => i.id));
+              setPreview(null);
+            })
+          }
+        >
+          בחירת הכול — כל העמודים
+        </button>
+        <button
+          className="button outline"
+          disabled={busy || !selected.length}
+          onClick={() => {
+            setSelected([]);
+            setPreview(null);
+          }}
+        >
+          ניקוי בחירה
+        </button>
+        <span role="status">נבחרו {selected.length} פריטים</span>
+        <button
+          className="button outline danger"
+          disabled={busy || !selected.length}
+          onClick={() =>
+            setRemove({ selection, restore: collection === "trash" })
+          }
+        >
+          {collection === "trash" ? "שחזור הנבחרים" : "מחיקת הנבחרים"}
+        </button>
+      </div>
+      <div className="k-actions">
+        <button
+          className="button outline"
+          disabled={
+            busy ||
+            selected.length < 2 ||
+            selected.length > 10 ||
+            view?.items.filter((i: any) => selected.includes(i.id)).length !==
+              selected.length ||
+            collection !== "pending"
+          }
           onClick={() =>
             run(async () => {
               const items = view.items.filter((i: any) =>
@@ -219,30 +299,24 @@ export function Imports() {
         </button>
         <button
           className="button primary"
-          disabled={busy || !selected.length}
+          disabled={busy || !selected.length || collection !== "pending"}
           onClick={() =>
             run(async () => {
-              const items = view.items
-                .filter(
-                  (i: any) => selected.includes(i.id) && i.status !== "saved",
-                )
-                .map((i: any) => ({
-                  id: i.id,
-                  revision: i.revision,
-                  content: i.draft,
-                  paths: pathFor(i)
-                    .split("\n")
-                    .filter(Boolean)
-                    .map((p: string) =>
-                      p.split("/").map((s: string) => s.trim()),
-                    ),
-                }));
-              if (items.some((i: any) => !i.content || !i.paths.length))
-                throw Error("לכל פריט נדרשים נתונים ומסלול קטגוריה לפני אישור");
-              const result = await api("/categories/preview", "POST", {
-                paths: items.flatMap((i: any) => i.paths),
-              });
-              setPreview({ ...result, items });
+              const overrides = Object.fromEntries(
+                selected
+                  .filter((id) => paths[id] !== undefined)
+                  .map((id) => [
+                    id,
+                    paths[id]
+                      .split("\n")
+                      .filter(Boolean)
+                      .map((p) => p.split("/").map((s) => s.trim())),
+                  ]),
+              );
+              const body = { selection, overrides };
+              const result = await api("/imports/preview-batch", "POST", body);
+              setProgress("");
+              setPreview({ ...result, ...body });
             })
           }
         >
@@ -256,9 +330,10 @@ export function Imports() {
               <input
                 type="checkbox"
                 aria-label={"בחירת " + (item.draft?.title || "פריט ייבוא")}
-                disabled={["saved", "processing"].includes(item.status)}
+                disabled={item.status === "processing"}
                 checked={selected.includes(item.id)}
                 onChange={() => {
+                  setVersions((v) => ({ ...v, [item.id]: snapshot(item) }));
                   setSelected((p) =>
                     p.includes(item.id)
                       ? p.filter((id) => id !== item.id)
@@ -314,7 +389,7 @@ export function Imports() {
                   ייתכן שנדרש פיצול: {item.draft.split_suggestion}
                 </p>
               )}
-              {item.status !== "saved" && (
+              {!["saved", "trash"].includes(item.status) && (
                 <label>
                   מסלולי קטגוריות מוצעים — כל מסלול בשורה
                   <textarea
@@ -345,7 +420,27 @@ export function Imports() {
                 </label>
               )}
               <div className="k-actions">
-                {item.status === "saved" ? (
+                {item.status !== "trash" && (
+                  <button
+                    className="button outline danger"
+                    disabled={busy}
+                    onClick={() =>
+                      setRemove({ selection: [snapshot(item)], restore: false })
+                    }
+                  >
+                    מחיקה
+                  </button>
+                )}
+                {item.status === "trash" ? (
+                  <button
+                    className="button outline"
+                    onClick={() =>
+                      setRemove({ selection: [snapshot(item)], restore: true })
+                    }
+                  >
+                    שחזור
+                  </button>
+                ) : item.status === "saved" ? (
                   <button
                     className="button outline"
                     onClick={() => go("/recipes/" + item.recipe_id)}
@@ -405,8 +500,8 @@ export function Imports() {
           הקודמים
         </button>
         <span>
-          {offset + 1}–{Math.min(offset + 50, view?.total ?? 0)} מתוך{" "}
-          {view?.total ?? 0}
+          {view?.total ? offset + 1 : 0}–
+          {Math.min(offset + 50, view?.total ?? 0)} מתוך {view?.total ?? 0}
         </span>
         <button
           className="button outline"
@@ -422,10 +517,22 @@ export function Imports() {
             {preview.new_images} תמונות קטגוריה חדשות יתווספו לתור בעקבות
             האישור. אם AI אינו זמין, הקטגוריות והמתכונים יישמרו והתמונות ימתינו.
           </p>
-          {preview.items.map((i: any) => (
+          <p>
+            שמירת {preview.items.length} מתכונים. פרטים חסרים אינם מעכבים שמירה
+            וניתנים להשלמה בהמשך.
+          </p>
+          {preview.items.slice(0, 20).map((i: any) => (
             <div className="k-panel" key={i.id}>
-              <strong>{i.content.title}</strong>
-              <p>{i.paths.map((p: string[]) => p.join(" ← ")).join(" · ")}</p>
+              <strong>{i.title || "מתכון מתמונה"}</strong>
+              <p>
+                {i.paths.length
+                  ? i.paths.map((p: string[]) => p.join(" ← ")).join(" · ")
+                  : "ללא קטגוריה — אפשר להוסיף בהמשך"}
+              </p>
+              {i.source_only && <small>צילום מקור בלבד — הטקסט טרם חולץ</small>}
+              {i.warning_count > 0 && (
+                <small>{i.warning_count} פרטים להשלמה בהמשך</small>
+              )}
             </div>
           ))}
           <button
@@ -433,11 +540,31 @@ export function Imports() {
             disabled={busy}
             onClick={() =>
               run(async () => {
-                await api("/imports/approve", "POST", {
-                  confirmed: true,
-                  expected_new_images: preview.new_images,
-                  items: preview.items,
-                });
+                let images = 0;
+                for (let at = 0; at < preview.selection.length; at += 50) {
+                  const part = {
+                    selection: preview.selection.slice(at, at + 50),
+                    overrides: preview.overrides,
+                  };
+                  const check = await api(
+                    "/imports/preview-batch",
+                    "POST",
+                    part,
+                  );
+                  if (images + check.new_images > preview.new_images)
+                    throw Error(
+                      "עץ הקטגוריות השתנה; יש לבדוק מחדש את הפריטים שנותרו. מה שכבר נשמר נשאר במאגר.",
+                    );
+                  const result = await api("/imports/approve-batch", "POST", {
+                    ...part,
+                    confirmed: true,
+                    expected_new_images: check.new_images,
+                  });
+                  images += result.new_images;
+                  setProgress(
+                    `טופלו ${Math.min(at + 50, preview.selection.length)} מתוך ${preview.selection.length}`,
+                  );
+                }
                 setPreview(null);
                 setSelected([]);
                 reload();
@@ -448,10 +575,44 @@ export function Imports() {
           >
             <Check size={16} /> אישור ההצעות ושמירת המתכונים
           </button>
-          <button className="button outline" onClick={() => setPreview(null)}>
+          {progress && <p role="status">{progress}</p>}
+          {preview.items.length > 20 && (
+            <p>ועוד {preview.items.length - 20} מתכונים באותה בחירה.</p>
+          )}
+          <button
+            className="button outline"
+            disabled={busy}
+            onClick={() => setPreview(null)}
+          >
             חזרה לשינוי לפני אישור
           </button>
         </Dialog>
+      )}
+      {remove && (
+        <Confirm
+          close={() => setRemove(null)}
+          text={
+            remove.restore
+              ? `לשחזר ${remove.selection.length} פריטים?`
+              : `למחוק ${remove.selection.length} פריטים? הם יועברו לסל המחזור עם אפשרות שחזור. תמונות המקור יישמרו.`
+          }
+          onConfirm={async () => {
+            for (let at = 0; at < remove.selection.length; at += 50)
+              await api(
+                "/imports/" + (remove.restore ? "restore" : "trash"),
+                "POST",
+                {
+                  confirmed: true,
+                  selection: remove.selection.slice(at, at + 50),
+                },
+              );
+            setRemove(null);
+            setSelected([]);
+            reload();
+            page.reload();
+            notify("הפעולה נשמרה בשרת");
+          }}
+        />
       )}
       {review && (
         <ImportReview

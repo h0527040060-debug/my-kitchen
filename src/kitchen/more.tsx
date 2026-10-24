@@ -9,7 +9,9 @@ import {
   Dialog,
 } from "./ui.tsx";
 import { CategoryPicker } from "./editor.tsx";
+import { AccountSettings } from "./account.tsx";
 export function More() {
+  const [account, setAccount] = useState(false);
   const { data, reload } = useResource<any>("/settings");
   const categories = useResource<any>("/categories", 5000);
   const jobs = useResource<any>("/jobs", 5000);
@@ -28,6 +30,9 @@ export function More() {
         subtitle="מצרכים בבית, קטגוריות, שימוש AI והיסטוריה."
       />
       <div className="k-actions">
+        <button className="button outline" onClick={() => setAccount(true)}>
+          ניהול החשבון
+        </button>
         <button className="button primary" onClick={() => go("/pantry")}>
           מה יש לי בבית?
         </button>
@@ -327,6 +332,7 @@ export function More() {
           changed={categories.reload}
         />
       )}
+      {account && <AccountSettings close={() => setAccount(false)} />}
     </>
   );
 }

@@ -19,7 +19,12 @@ import {
 } from "./recipes.ts";
 import { enqueue } from "./jobs.ts";
 import { MeasurementSchema, RecipeContentSchema } from "../shared/model.ts";
-import { readiness, scaleRecipe, parseNumber } from "../shared/quantities.ts";
+import {
+  readiness,
+  scaleRecipe,
+  parseNumber,
+  hasBaseYield,
+} from "../shared/quantities.ts";
 import {
   normalize,
   pantryMatches,
@@ -35,7 +40,23 @@ import { fieldSources } from "../shared/provenance.ts";
 import { prices } from "./pricing.ts";
 import { measurementPreferences, insertShoppingLine } from "./shopping.ts";
 import { mediaLimits, hostingInfo } from "./limits.ts";
-import { chatIntakeRouter, ownerChatImportRouter, mergeChatDrafts } from "./chat-import.ts";
+import {
+  chatIntakeRouter,
+  ownerChatImportRouter,
+  mergeChatDrafts,
+} from "./chat-import.ts";
+import {
+  SelectionSchema,
+  ImportBatchSchema,
+  OptionalPaths,
+  importWhere,
+  previewImports,
+  approveImportBatch,
+  changeImportTrash,
+  trashRecipe,
+  restoreRecipe,
+} from "./collection.ts";
+import { accountRouter, recoveryLimiter, recoverAccount } from "./account.ts";
 const uuid = z.string().uuid(),
   contentSchema = RecipeContentSchema;
 const recipeSave = z.object({
@@ -118,8 +139,10 @@ export function createApp() {
       return login(db, b.email, b.password, res);
     }),
   );
+  app.post("/api/account/recover", recoveryLimiter, wrap(recoverAccount));
   app.use("/api/chat-intake", chatIntakeRouter());
   app.use("/api", authMiddleware(db));
+  app.use("/api/account", accountRouter());
   app.use("/api/chat-import", ownerChatImportRouter());
   app.use(
     "/api",
@@ -501,6 +524,20 @@ export function createApp() {
         name: "r.title",
       };
       const where = conditions.join(" and ");
+      if (req.query.selection === "true") {
+        const rows = (
+          await db.query(
+            `select r.id,r.revision,r.title from kitchen.recipes r where ${where} order by r.id limit 10001`,
+            params,
+          )
+        ).rows;
+        if (rows.length > 10000)
+          throw new HttpError(
+            400,
+            "אפשר לבחור עד 10,000 מתכונים בכל פעולה; יש לצמצם מסננים",
+          );
+        return { items: rows, total: rows.length };
+      }
       const total = (
         await db.query(
           `select count(*)::int as n from kitchen.recipes r where ${where}`,
@@ -610,7 +647,7 @@ export function createApp() {
           measurement_config: version.measurement_config,
           status: "draft",
           category_ids: current.category_ids,
-          confirm_categories: false,
+          confirm_categories: true,
           reason: `שחזור מגרסה ${req.body.version}`,
         });
       }),
@@ -630,24 +667,62 @@ export function createApp() {
     "/api/recipes/:id",
     wrap(async (req) => {
       z.literal(true).parse(req.body.confirmed);
-      const r = await db.query(
-        "update kitchen.recipes set status='trash',deleted_at=now(),revision=revision+1 where id=$1 and revision=$2 returning id",
-        [uuid.parse(req.params.id), z.number().int().parse(req.body.revision)],
+      await transaction((tx) =>
+        trashRecipe(
+          tx,
+          uuid.parse(req.params.id),
+          z.number().int().parse(req.body.revision),
+        ),
       );
-      if (!r.rows.length) throw new HttpError(409, "המתכון השתנה או לא נמצא");
       return { ok: true };
     }),
   );
   app.post(
     "/api/recipes/:id/restore",
     wrap(async (req) => {
-      await db.query(
-        "update kitchen.recipes set status='draft',deleted_at=null,revision=revision+1 where id=$1 and status='trash'",
-        [uuid.parse(req.params.id)],
+      await transaction((tx) =>
+        restoreRecipe(
+          tx,
+          uuid.parse(req.params.id),
+          z.number().int().optional().parse(req.body.revision),
+        ),
       );
       return { ok: true };
     }),
   );
+  for (const action of ["trash", "restore"] as const)
+    app.post(
+      "/api/recipe-collection/" + action,
+      wrap(async (req) => {
+        const body = z
+          .object({ confirmed: z.literal(true), selection: SelectionSchema })
+          .parse(req.body);
+        await transaction(async (tx) => {
+          await tx.query("select pg_advisory_xact_lock(746825)");
+          for (const item of [...body.selection].sort((a, b) =>
+            a.id.localeCompare(b.id),
+          )) {
+            const current = (
+              await tx.query(
+                "select status,revision from kitchen.recipes where id=$1",
+                [item.id],
+              )
+            ).rows[0];
+            if (
+              current &&
+              (action === "trash"
+                ? current.status === "trash"
+                : current.status !== "trash")
+            )
+              continue;
+            if (action === "trash")
+              await trashRecipe(tx, item.id, item.revision);
+            else await restoreRecipe(tx, item.id, item.revision);
+          }
+        });
+        return { count: body.selection.length };
+      }),
+    );
   app.post(
     "/api/recipes/:id/image",
     wrap(async (req) => {
@@ -970,27 +1045,92 @@ export function createApp() {
   app.get(
     "/api/imports",
     wrap(async (req) => {
-      const offset = Math.max(0, Number(req.query.offset) || 0);
+      const offset = Math.max(0, Number(req.query.offset) || 0),
+        where = importWhere(req.query.view);
       return {
         items: (
           await db.query(
-            "select i.*,coalesce((select jsonb_agg(jsonb_build_object('id',m.id,'state',m.state,'metadata',m.metadata) order by im.position) from kitchen.import_media im join kitchen.media m on m.id=im.media_id where im.item_id=i.id),'[]') as media from kitchen.import_items i where status<>'merged' order by i.created_at desc limit 50 offset $1",
+            `select i.*,r.revision recipe_revision,coalesce((select jsonb_agg(jsonb_build_object('id',m.id,'state',m.state,'metadata',m.metadata) order by im.position) from kitchen.import_media im join kitchen.media m on m.id=im.media_id where im.item_id=i.id),'[]') media from kitchen.import_items i left join kitchen.recipes r on r.id=i.recipe_id where ${where} order by i.created_at desc,i.id limit 50 offset $1`,
             [offset],
           )
         ).rows,
         total: (
           await db.query(
-            "select count(*)::int n from kitchen.import_items where status<>'merged'",
+            `select count(*)::int n from kitchen.import_items i where ${where}`,
           )
         ).rows[0].n,
         summary: (
           await db.query(
-            "select status,count(*)::int n from kitchen.import_items group by status",
+            "select status,count(*)::int n from kitchen.import_items where status<>'merged' group by status",
           )
         ).rows,
       };
     }),
   );
+  app.get(
+    "/api/imports/selection",
+    wrap(async (req) => {
+      const where = importWhere(req.query.view ?? "pending");
+      const rows = (
+        await db.query(
+          `select i.id,i.revision,r.revision recipe_revision from kitchen.import_items i left join kitchen.recipes r on r.id=i.recipe_id where ${where} and i.status not in('processing','merged') order by i.id limit 10001`,
+        )
+      ).rows;
+      if (rows.length > 10000)
+        throw new HttpError(400, "אפשר לבחור עד 10,000 פריטים בכל פעולה");
+      return { items: rows };
+    }),
+  );
+  app.post(
+    "/api/imports/preview-batch",
+    wrap(async (req) => {
+      const result = await previewImports(
+        db,
+        ImportBatchSchema.parse(req.body),
+      );
+      return {
+        new_images: result.new_images,
+        items: result.candidates.map((item) => ({
+          id: item.id,
+          title: item.title,
+          revision: item.revision,
+          paths: item.paths,
+          source_only: item.source_only,
+          warning_count: item.warnings.length,
+        })),
+      };
+    }),
+  );
+  app.post(
+    "/api/imports/approve-batch",
+    wrap(async (req) => {
+      z.literal(true).parse(req.body.confirmed);
+      const expected = z
+        .number()
+        .int()
+        .nonnegative()
+        .parse(req.body.expected_new_images);
+      const body = ImportBatchSchema.parse(req.body);
+      if (body.selection.length > 50)
+        throw new HttpError(
+          400,
+          "פעולת שמירה אחת מקבלת עד 50 פריטים; אפשר להמשיך באצווה הבאה",
+        );
+      return transaction((tx) => approveImportBatch(tx, body, expected));
+    }),
+  );
+  for (const action of ["trash", "restore"] as const)
+    app.post(
+      "/api/imports/" + action,
+      wrap(async (req) => {
+        const body = z
+          .object({ confirmed: z.literal(true), selection: SelectionSchema })
+          .parse(req.body);
+        return transaction((tx) =>
+          changeImportTrash(tx, body.selection, action === "restore"),
+        );
+      }),
+    );
   app.patch(
     "/api/imports/:id/classification",
     wrap(async (req) => {
@@ -1010,7 +1150,7 @@ export function createApp() {
           ? "ready"
           : item.status;
       const result = await db.query(
-        "update kitchen.import_items set suggestions=jsonb_set(coalesce(suggestions,'{}'::jsonb),'{manual_paths}',$2::jsonb),status=$3,updated_at=now() where id=$1 and status not in('saved','merged') returning id",
+        "update kitchen.import_items set suggestions=jsonb_set(coalesce(suggestions,'{}'::jsonb),'{manual_paths}',$2::jsonb),status=$3,updated_at=now() where id=$1 and status not in('saved','merged','trash') returning id",
         [item.id, JSON.stringify(paths), status],
       );
       return requireValue(result.rows[0]);
@@ -1041,7 +1181,7 @@ export function createApp() {
         [uuid.parse(req.params.id), JSON.stringify(provenance), b.revision],
       );
       const r = await db.query(
-        "update kitchen.import_items set draft=$3,revision=revision+1,status='needs_review',updated_at=now() where id=$1 and revision=$2 and status<>'saved' returning *",
+        "update kitchen.import_items set draft=$3,revision=revision+1,status='needs_review',updated_at=now() where id=$1 and revision=$2 and status not in('saved','merged','trash') returning *",
         [uuid.parse(req.params.id), b.revision, JSON.stringify(b.draft)],
       );
       if (!r.rows.length)
@@ -1061,7 +1201,7 @@ export function createApp() {
       return transaction(async (tx) => {
         const items = (
           await tx.query(
-            "select * from kitchen.import_items where id=any($1::uuid[]) and status not in ('saved','merged','processing') for update",
+            "select * from kitchen.import_items where id=any($1::uuid[]) and status not in ('saved','merged','processing','trash') for update",
             [b.item_ids],
           )
         ).rows;
@@ -1081,7 +1221,7 @@ export function createApp() {
           !media.every((id) => b.media_order.includes(id))
         )
           throw new HttpError(400, "סדר התמונות אינו תואם לקבוצה");
-        if (items.every(i => i.suggestions?.chat_import && i.draft))
+        if (items.every((i) => i.suggestions?.chat_import && i.draft))
           return mergeChatDrafts(tx, items, b.media_order);
         const id = randomUUID();
         await tx.query("insert into kitchen.import_items(id) values($1)", [id]);
@@ -1126,7 +1266,7 @@ export function createApp() {
         );
         if (
           item.revision !== b.revision ||
-          ["processing", "saved", "merged"].includes(item.status)
+          ["processing", "saved", "merged", "trash"].includes(item.status)
         )
           throw new HttpError(409, "הפריט השתנה או נמצא בעיבוד");
         const existing = (
@@ -1178,7 +1318,7 @@ export function createApp() {
         const item = requireValue(
           (
             await tx.query(
-              "select * from kitchen.import_items where id=$1 and status not in('saved','merged') for update",
+              "select * from kitchen.import_items where id=$1 and status not in('saved','merged','trash') for update",
               [uuid.parse(req.params.id)],
             )
           ).rows[0],
@@ -1256,7 +1396,7 @@ export function createApp() {
         id: uuid,
         revision: z.number().int(),
         content: contentSchema,
-        paths: pathsSchema,
+        paths: OptionalPaths,
       });
       const b = z
         .object({
@@ -1266,6 +1406,7 @@ export function createApp() {
         })
         .parse(req.body);
       return transaction(async (tx) => {
+        await tx.query("select pg_advisory_xact_lock(746825)");
         await tx.query("select pg_advisory_xact_lock(746822)");
         const preview = await categoryPreview(
           tx,
@@ -1287,6 +1428,8 @@ export function createApp() {
               )
             ).rows[0],
           );
+          if (["trash", "merged", "processing"].includes(item.status))
+            throw new HttpError(409, "הפריט אינו זמין לשמירה");
           if (item.status === "saved") {
             results.push({
               id: input.id,
@@ -1375,7 +1518,7 @@ export function createApp() {
         );
         if (job.operation === "extractRecipe")
           await tx.query(
-            "update kitchen.import_items set status='queued',error=null where id=$1 and status<>'saved'",
+            "update kitchen.import_items set status='queued',error=null where id=$1 and status not in('saved','merged','trash')",
             [job.payload.item_id],
           );
         return { ok: true };
@@ -1460,12 +1603,18 @@ export function createApp() {
     "/api/cooking",
     wrap(async (req) => {
       const b = z
-        .object({ recipe_id: uuid, target: z.string().max(50) })
+        .object({ recipe_id: uuid, target: z.string().max(50).default("") })
         .parse(req.body);
       const recipe = await getRecipe(db, b.recipe_id);
-      if (recipe.status !== "published" || readiness(recipe.content).length)
-        throw new HttpError(422, "יש לאשר מתכון ולהשלים תפוקת בסיס לפני בישול");
-      scaleRecipe(recipe.content, b.target);
+      if (recipe.status !== "published")
+        throw new HttpError(422, "יש לשמור את המתכון במאגר לפני התחלת בישול");
+      const target = b.target;
+      if (target && !hasBaseYield(recipe.content))
+        throw new HttpError(
+          422,
+          "להתאמת כמויות יש להשלים תפוקת בסיס; אפשר לבשל בכמויות המקור",
+        );
+      if (target) scaleRecipe(recipe.content, target);
       const id = randomUUID();
       await db.query(
         "insert into kitchen.cooking(id,recipe_id,recipe_revision,snapshot,target) values($1,$2,$3,$4,$5)",
@@ -1474,7 +1623,7 @@ export function createApp() {
           recipe.id,
           recipe.revision,
           JSON.stringify(recipe.content),
-          b.target,
+          target,
         ],
       );
       await db.query(
@@ -2228,7 +2377,9 @@ export function createApp() {
             recipe_id: r.id,
             content: r.content,
             measurement_config: r.measurement_config,
-            target: b.target ?? r.content.yield?.amount,
+            target:
+              b.target ??
+              (hasBaseYield(r.content) ? r.content.yield.amount : ""),
           },
         ];
       }

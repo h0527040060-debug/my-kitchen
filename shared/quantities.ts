@@ -113,6 +113,15 @@ export function amountText(amount: Amount) {
         ? "כמות חסרה"
         : amount.text;
 }
+export function hasBaseYield(content: RecipeContent): boolean {
+  try {
+    return (
+      !!content.yield?.unit.trim() && parseNumber(content.yield.amount).n > 0n
+    );
+  } catch {
+    return false;
+  }
+}
 export function scaleRecipe(content: RecipeContent, target: string) {
   if (!content.yield) throw Error("יש להשלים תפוקת בסיס");
   const base = parseNumber(content.yield.amount),

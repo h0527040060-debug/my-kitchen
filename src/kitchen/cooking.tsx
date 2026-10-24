@@ -20,7 +20,11 @@ import {
   JobResult,
 } from "./ui.tsx";
 import { Assistant } from "./recipes.tsx";
-import { scaleRecipe, amountText } from "../../shared/quantities.ts";
+import {
+  scaleRecipe,
+  amountText,
+  hasBaseYield,
+} from "../../shared/quantities.ts";
 import { selectedIngredient } from "../../shared/planning.ts";
 export function Cooking({ id }: { id: string }) {
   const { data, error, loading, reload, setData } = useResource<any>(
@@ -77,7 +81,9 @@ export function Cooking({ id }: { id: string }) {
   if (!data)
     return <LoadState loading={loading} error={error} retry={reload} />;
   const c = data.cooking,
-    scaled = scaleRecipe(c.snapshot, c.target),
+    scaled = c.target
+      ? scaleRecipe(c.snapshot, c.target)
+      : (c.snapshot as ReturnType<typeof scaleRecipe>),
     step = scaled.steps[c.step_index],
     active = c.state === "active";
   async function patch(patch: any) {
@@ -98,7 +104,10 @@ export function Cooking({ id }: { id: string }) {
     }
     if (normalized.includes("הבא")) {
       await patch({
-        step_index: Math.min(c.step_index + 1, scaled.steps.length - 1),
+        step_index: Math.max(
+          0,
+          Math.min(c.step_index + 1, scaled.steps.length - 1),
+        ),
       });
       setMode("steps");
       return;
@@ -205,8 +214,8 @@ export function Cooking({ id }: { id: string }) {
   return (
     <>
       <PageTitle
-        title={c.snapshot.title}
-        subtitle={`בישול ${active ? "פעיל" : c.state === "completed" ? "שהושלם" : "שבוטל"} · גרסה ${c.recipe_revision} · ${c.target} ${c.snapshot.yield.unit}`}
+        title={c.snapshot.title || "מתכון ללא שם"}
+        subtitle={`בישול ${active ? "פעיל" : c.state === "completed" ? "שהושלם" : "שבוטל"} · גרסה ${c.recipe_revision} · ${c.target ? c.target + " " + c.snapshot.yield?.unit : "כמויות המקור"}`}
         back={() => go("/recipes/" + c.recipe_id)}
       >
         <button className="button outline" onClick={() => setAssistant(true)}>
@@ -238,12 +247,12 @@ export function Cooking({ id }: { id: string }) {
         <div className="k-cook-tools">
           <button
             className="button outline"
-            disabled={busy}
+            disabled={busy || !hasBaseYield(c.snapshot)}
             onClick={() =>
               run(async () => {
                 const target = window.prompt(
                   "כמות חדשה באותה יחידת תפוקה",
-                  c.target,
+                  c.target || c.snapshot.yield?.amount || "",
                 );
                 if (
                   target &&

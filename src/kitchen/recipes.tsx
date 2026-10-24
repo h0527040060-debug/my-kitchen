@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Plus,
   Search,
@@ -26,6 +26,7 @@ import { sourceLabel } from "../../shared/provenance.ts";
 import { RecipeEditor } from "./editor.tsx";
 import {
   scaleRecipe,
+  hasBaseYield,
   amountText,
   panRatio,
   selectedIngredient,
@@ -49,6 +50,8 @@ export function RecipeHome() {
     [editing, setEditing] = useState(false),
     [natural, setNatural] = useState<string | null>(null),
     [naturalJob, setNaturalJob] = useState<string | null>(null);
+  const [selection, setSelection] = useState<any[]>([]),
+    [remove, setRemove] = useState<any[] | null>(null);
   const params = new URLSearchParams({
     q: query,
     status,
@@ -71,6 +74,10 @@ export function RecipeHome() {
   const { data, error, loading, reload } = useResource<any>(
     "/recipes?" + params.toString(),
   );
+  const scope = new URLSearchParams(params);
+  scope.delete("offset");
+  const selectionScope = scope.toString();
+  useEffect(() => setSelection([]), [selectionScope]);
   const categories = useResource<any>("/categories"),
     cooking = useResource<any>("/cooking");
   const { run, busy, notify } = useAction();
@@ -187,7 +194,7 @@ export function RecipeHome() {
               change();
             }}
           >
-            <option value="published">מתכונים מאושרים</option>
+            <option value="published">המתכונים שלי</option>
             <option value="draft">טיוטות</option>
             <option value="trash">סל מחזור</option>
           </select>
@@ -339,9 +346,55 @@ export function RecipeHome() {
       {data && (
         <>
           <p className="k-note">{data.total} מתכונים באוסף</p>
+          <div className="k-actions">
+            <button
+              className="button outline"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const all = await api(
+                    "/recipes?" + params + "&selection=true",
+                  );
+                  setSelection(all.items);
+                })
+              }
+            >
+              בחירת הכול — כל העמודים
+            </button>
+            <button
+              className="button outline"
+              disabled={busy || !selection.length}
+              onClick={() => setSelection([])}
+            >
+              ניקוי בחירה
+            </button>
+            <span role="status">נבחרו {selection.length} מתכונים</span>
+            <button
+              className="button outline danger"
+              disabled={busy || !selection.length}
+              onClick={() => setRemove(selection)}
+            >
+              {status === "trash" ? "שחזור הנבחרים" : "מחיקת הנבחרים"}
+            </button>
+          </div>
           <div className="k-recipes-grid">
             {data.items.map((r: any) => (
               <article className="k-card" key={r.id}>
+                <label className="k-card-select">
+                  <input
+                    type="checkbox"
+                    aria-label={"בחירת " + (r.title || "מתכון ללא שם")}
+                    checked={selection.some((s) => s.id === r.id)}
+                    onChange={(e) =>
+                      setSelection((old) =>
+                        e.target.checked
+                          ? [...old, { id: r.id, revision: r.revision }]
+                          : old.filter((s) => s.id !== r.id),
+                      )
+                    }
+                  />{" "}
+                  בחירה
+                </label>
                 <button
                   className="k-card-photo"
                   onClick={() => go("/recipes/" + r.id)}
@@ -370,9 +423,17 @@ export function RecipeHome() {
                 </button>
                 <div className="k-card-content">
                   <button onClick={() => go("/recipes/" + r.id)}>
-                    <h2>{r.title || "טיוטה ללא שם"}</h2>
+                    <h2>{r.title || "מתכון ללא שם"}</h2>
                   </button>
                   <p>{r.description}</p>
+                  <button
+                    className="k-text danger"
+                    onClick={() =>
+                      setRemove([{ id: r.id, revision: r.revision }])
+                    }
+                  >
+                    {status === "trash" ? "שחזור" : "מחיקה"}
+                  </button>
                   <div className="k-meta">
                     <span>
                       <Clock size={14} /> עבודה: {r.active_minutes ?? "לא צוין"}
@@ -425,6 +486,29 @@ export function RecipeHome() {
           </div>
         </>
       )}
+      {remove && (
+        <Confirm
+          close={() => setRemove(null)}
+          text={
+            status === "trash"
+              ? `לשחזר ${remove.length} מתכונים?`
+              : `למחוק ${remove.length} מתכונים? הם יעברו לסל המחזור עם אפשרות שחזור, והתמונות יישמרו.`
+          }
+          onConfirm={async () => {
+            for (let at = 0; at < remove.length; at += 50)
+              await api(
+                "/recipe-collection/" +
+                  (status === "trash" ? "restore" : "trash"),
+                "POST",
+                { confirmed: true, selection: remove.slice(at, at + 50) },
+              );
+            setRemove(null);
+            setSelection([]);
+            reload();
+            notify("הפעולה נשמרה בשרת");
+          }}
+        />
+      )}
       {editing && (
         <RecipeEditor
           close={() => setEditing(false)}
@@ -468,13 +552,21 @@ export function RecipeDetail({ id }: { id: string }) {
   return (
     <>
       <PageTitle
-        title={c.title || "טיוטה"}
-        subtitle={`גרסה ${r.revision} · ${r.status === "published" ? "מתכון מאושר" : r.status === "trash" ? "בסל המחזור" : "טיוטה — עדיין לא מאושרת"}`}
+        title={c.title || "מתכון ללא שם"}
+        subtitle={`גרסה ${r.revision} · ${r.status === "published" ? "מתכון שמור במאגר" : r.status === "trash" ? "בסל המחזור" : "טיוטה — עדיין לא מאושרת"}`}
         back={() => go("/recipes")}
       >
         <button className="button outline" onClick={() => setEditing(true)}>
           עריכה
         </button>
+        {r.status !== "trash" && (
+          <button
+            className="button outline danger"
+            onClick={() => setConfirmDelete(true)}
+          >
+            מחיקת מתכון
+          </button>
+        )}
         <button
           className="button primary"
           disabled={busy || r.status !== "published" || !!scaleError}
@@ -482,7 +574,7 @@ export function RecipeDetail({ id }: { id: string }) {
             run(async () => {
               const cooking = await api("/cooking", "POST", {
                 recipe_id: id,
-                target: target || c.yield?.amount,
+                target: target || "",
               });
               go("/cook/" + cooking.id);
             })
@@ -520,6 +612,7 @@ export function RecipeDetail({ id }: { id: string }) {
           <input
             dir="auto"
             value={target}
+            disabled={!hasBaseYield(c)}
             onChange={(e) => setTarget(e.target.value)}
             placeholder={c.yield?.amount || "נדרשת תפוקת בסיס"}
           />
@@ -528,6 +621,22 @@ export function RecipeDetail({ id }: { id: string }) {
           חזרה לבסיס
         </button>
       </div>
+      {!hasBaseYield(c) && (
+        <p className="k-note">
+          תפוקת בסיס לא צוינה. אפשר לקרוא ולבשל לפי המקור; התאמת כמויות תהיה
+          זמינה אחרי השלמת תפוקה בעריכה.
+        </p>
+      )}
+      {r.warnings?.length > 0 && (
+        <details className="k-note">
+          <summary>פרטים להשלמה בהמשך ({r.warnings.length})</summary>
+          <ul>
+            {r.warnings.map((w: string, n: number) => (
+              <li key={n}>{w}</li>
+            ))}
+          </ul>
+        </details>
+      )}
       {scaleError && <p className="k-alert">{scaleError}</p>}
       {target && !scaleError && (
         <p className="k-note">
@@ -798,13 +907,13 @@ export function RecipeDetail({ id }: { id: string }) {
         </button>
         <button
           className="button outline"
-          disabled={busy || !c.yield || !!scaleError}
+          disabled={busy || !!scaleError}
           onClick={() =>
             run(async () => {
               const list = await api("/shopping", "POST", {
-                name: c.title,
+                name: c.title || "קניות למתכון",
                 recipe_id: id,
-                target: target || c.yield.amount,
+                target: target || (hasBaseYield(c) ? c.yield.amount : ""),
               });
               go("/shopping/" + list.id);
             })
@@ -856,7 +965,9 @@ export function RecipeDetail({ id }: { id: string }) {
           disabled={busy}
           onClick={() =>
             run(async () => {
-              await api(`/recipes/${id}/restore`, "POST", {});
+              await api(`/recipes/${id}/restore`, "POST", {
+                revision: r.revision,
+              });
               reload();
             })
           }

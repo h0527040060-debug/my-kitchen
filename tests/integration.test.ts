@@ -166,7 +166,14 @@ test("real PostgreSQL API, worker recovery, owner security and full media restor
           category_ids: [],
           confirm_categories: false,
         });
-        assert.equal(missing.status, 422);
+        assert.equal(missing.status, 200);
+        const unconfirmed = await request("/recipes", "POST", {
+          content: recipe(),
+          status: "published",
+          category_ids: [cat],
+          confirm_categories: false,
+        });
+        assert.equal(unconfirmed.status, 422);
         const saved = await request("/recipes", "POST", {
           content: recipe(),
           status: "published",

@@ -16,7 +16,8 @@ export async function getRecipe(tx: Db, id: string) {
     "select r.*,coalesce((select jsonb_agg(category_id) from kitchen.recipe_categories where recipe_id=r.id),'[]') as category_ids from kitchen.recipes r where id=$1",
     [id],
   );
-  return requireValue(r.rows[0], "המתכון לא נמצא");
+  const row = requireValue(r.rows[0], "המתכון לא נמצא");
+  return { ...row, warnings: readiness(row.content) };
 }
 export async function saveRecipe(
   tx: Db,
@@ -41,13 +42,9 @@ export async function saveRecipe(
     new Set(stepIds).size !== stepIds.length
   )
     throw new HttpError(400, "מזהי מצרכים ושלבים חייבים להיות ייחודיים");
-  if (args.status === "published") {
-    const issues = readiness(content);
-    if (!args.confirm_categories || !args.category_ids.length)
-      issues.push("יש לבחור ולאשר קטגוריה");
-    if (issues.length)
-      throw new HttpError(422, "המתכון דורש השלמה לפני אישור", issues);
-  }
+  if (args.category_ids.length && !args.confirm_categories)
+    throw new HttpError(422, "שיוך קטגוריות דורש אישור");
+  await tx.query("select pg_advisory_xact_lock(746825)");
   if (args.category_ids.length) {
     const cats = await tx.query(
       "select id from kitchen.categories where id=any($1::uuid[])",
