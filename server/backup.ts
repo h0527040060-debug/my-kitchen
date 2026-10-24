@@ -30,6 +30,9 @@ export const backupTables = [
   "experiences",
   "experience_media",
   "assistant_messages",
+  "chat_import_config",
+  "chat_import_sources",
+  "chat_import_records",
 ];
 function safe(root: string, key: string) {
   const path = resolve(root, key);
@@ -100,6 +103,9 @@ export async function restoreFrom(
     !Array.isArray(manifest.objects)
   )
     throw Error("גיבוי אינו נתמך");
+  // Backups made before chat intake existed have no rows for its new tables.
+  for (const table of ["chat_import_config", "chat_import_sources", "chat_import_records"])
+    if (manifest.data[table] === undefined) manifest.data[table] = [];
   for (const table of backupTables)
     if (!Array.isArray(manifest.data[table])) throw Error("טבלה חסרה בגיבוי");
   for (const table of backupTables) {

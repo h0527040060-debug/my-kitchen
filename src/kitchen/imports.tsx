@@ -12,6 +12,7 @@ import {
 import { ContentEditor } from "./editor.tsx";
 import { amountText } from "../../shared/quantities.ts";
 import { emptyRecipe, type RecipeContent } from "../../shared/model.ts";
+import { ChatImportPanel } from "./chat-import.tsx";
 const statuses: Record<string, string> = {
   queued: "ממתין לעיבוד",
   processing: "מעבד",
@@ -100,12 +101,25 @@ export function Imports() {
         subtitle="המקור נשמר. הבדיקה והאישור תמיד בידיים שלך."
         back={() => go("/recipes")}
       />
+      <ChatImportPanel
+        changed={() => {
+          reload();
+          page.reload();
+        }}
+      />
       <section className="k-upload-panel">
         <Camera size={36} strokeWidth={1.3} />
         <h2>מה אספת למטבח שלך?</h2>
         <p>
           תמונה אחת מועמדת למתכון אחד. אפשר לקבץ צילומים של אותו מתכון בהמשך.
         </p>
+        {settings.data && !settings.data.ai.configured && (
+          <p className="k-note">
+            במסלול הצ׳אט שלך שולחים תמונות בשיחה או לתיקיית Drive שלמעלה. העלאה
+            ישירה כאן שומרת מקור, אך קריאה אוטומטית שלו בשרת ממתינה לחיבור AI
+            נפרד.
+          </p>
+        )}
         <div className="k-actions">
           <label className="button primary k-file-button">
             <Camera size={18} /> צילום
@@ -266,7 +280,7 @@ export function Imports() {
                       )
                     }
                   >
-                    <MediaImage id={m.id} />
+                    <MediaImage key={m.id + ":" + m.state} id={m.id} />
                   </button>
                 ))}
               </div>

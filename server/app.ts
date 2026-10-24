@@ -35,6 +35,7 @@ import { fieldSources } from "../shared/provenance.ts";
 import { prices } from "./pricing.ts";
 import { measurementPreferences, insertShoppingLine } from "./shopping.ts";
 import { mediaLimits, hostingInfo } from "./limits.ts";
+import { chatIntakeRouter, ownerChatImportRouter, mergeChatDrafts } from "./chat-import.ts";
 const uuid = z.string().uuid(),
   contentSchema = RecipeContentSchema;
 const recipeSave = z.object({
@@ -117,7 +118,9 @@ export function createApp() {
       return login(db, b.email, b.password, res);
     }),
   );
+  app.use("/api/chat-intake", chatIntakeRouter());
   app.use("/api", authMiddleware(db));
+  app.use("/api/chat-import", ownerChatImportRouter());
   app.use(
     "/api",
     rateLimit({
@@ -1078,6 +1081,8 @@ export function createApp() {
           !media.every((id) => b.media_order.includes(id))
         )
           throw new HttpError(400, "סדר התמונות אינו תואם לקבוצה");
+        if (items.every(i => i.suggestions?.chat_import && i.draft))
+          return mergeChatDrafts(tx, items, b.media_order);
         const id = randomUUID();
         await tx.query("insert into kitchen.import_items(id) values($1)", [id]);
         for (const [position, m] of b.media_order.entries())
@@ -2408,6 +2413,11 @@ export function createApp() {
         "pantry",
         "experiences",
         "experience_media",
+        "import_items",
+        "import_media",
+        "chat_import_config",
+        "chat_import_sources",
+        "chat_import_records",
       ];
       const data: Record<string, any> = {};
       for (const t of tables)
