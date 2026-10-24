@@ -7,3 +7,9 @@ dist/
 .DS_Store
 supabase/.temp/
 supabase/.branches/
+
+data/
+backups/
+playwright-report/
+test-results/
+!.env.server.example

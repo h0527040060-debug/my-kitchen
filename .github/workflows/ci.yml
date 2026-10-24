@@ -1,13 +1,30 @@
-name: Check and build
+name: Check, database and mobile browser
 on:
   push:
-    branches: [main]
+    branches: [main, full-kitchen]
   pull_request:
 permissions:
   contents: read
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: kitchen
+          POSTGRES_PASSWORD: ci-test-only
+          POSTGRES_DB: kitchen_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kitchen -d kitchen_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://kitchen:ci-test-only@localhost:5432/kitchen_test
+      AI_DAILY_MAX_CALLS: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,5 +32,14 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npm test
       - run: npm run build
+      - run: npm run test:integration
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-results
+          path: test-results/

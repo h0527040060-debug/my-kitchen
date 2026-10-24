@@ -1,0 +1,18 @@
+{
+  "name": "המטבח שלי",
+  "short_name": "המטבח שלי",
+  "lang": "he",
+  "dir": "rtl",
+  "start_url": "/#/recipes",
+  "display": "standalone",
+  "background_color": "#faf8f2",
+  "theme_color": "#52664c",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

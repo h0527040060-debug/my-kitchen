@@ -1,0 +1,188 @@
+import { test, expect } from "@playwright/test";
+import sharp from "sharp";
+import { spawn, type ChildProcess } from "node:child_process";
+let worker: ChildProcess;
+let recipeId = "";
+const title = "בדיקת נייד סינתטית — לחם הבית עם כותרת עברית ארוכה במיוחד";
+test.beforeAll(() => {
+  worker = spawn(
+    process.execPath,
+    ["--experimental-strip-types", "server/worker.ts"],
+    {
+      env: {
+        ...process.env,
+        OPENAI_API_KEY: "",
+        AI_DAILY_MAX_CALLS: "0",
+        DATABASE_URL:
+          process.env.DATABASE_URL ||
+          "postgresql://kitchen:kitchen-local-dev@localhost:5432/kitchen_test",
+      },
+      stdio: "ignore",
+    },
+  );
+});
+test.afterAll(() => worker?.kill("SIGTERM"));
+test.beforeEach(async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("אימייל", { exact: true }).fill("owner@example.test");
+  await page
+    .getByLabel("סיסמה", { exact: true })
+    .fill("test-only-password-12345");
+  await page
+    .getByRole("button", { name: "כניסה למטבח שלי", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "המטבח שלי", exact: true }),
+  ).toBeVisible();
+});
+test("mobile owner creates a real server recipe and preserves a cooking checklist across reloads", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "מתכון חדש", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "מתכון חדש" });
+  await editor.getByLabel("שם המתכון", { exact: true }).fill(title);
+  await editor.getByLabel("כמות בסיס", { exact: true }).fill("5");
+  await editor.getByLabel("יחידת תפוקה", { exact: true }).fill("מנות");
+  await editor.getByRole("button", { name: "מצרך", exact: true }).click();
+  await editor.getByLabel("שם", { exact: true }).fill("קמח");
+  await editor.getByRole("textbox", { name: "כמות", exact: true }).fill("2");
+  await editor.getByLabel("יחידה", { exact: true }).fill("ק״ג");
+  await editor.getByRole("button", { name: "שלב", exact: true }).click();
+  await editor
+    .getByLabel("הוראות", { exact: true })
+    .fill(
+      "ללוש בצק. לאפות 30 דקות ב־180 מעלות. זו שורת טקסט ארוכה כדי לבחון גלישת עברית במסך צר ולוודא שכל המידע נשאר קריא.",
+    );
+  await editor.getByRole("checkbox", { name: "בישול", exact: true }).check();
+  await page.setViewportSize({ width: 390, height: 480 });
+  await editor.getByLabel("הערות וטיפים", { exact: true }).focus();
+  await editor
+    .getByRole("button", { name: "אישור ושמירת מתכון", exact: true })
+    .click();
+  await expect(page).toHaveURL(/#\/recipes\/[a-f0-9-]+$/);
+  await expect(
+    page.getByRole("heading", { name: title, exact: true }),
+  ).toBeVisible();
+  recipeId = page.url().split("/recipes/")[1];
+  expect(recipeId).toBeTruthy();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByLabel("כמה מכינים?", { exact: true }).fill("8");
+  await expect(page.getByText("3.2", { exact: true })).toBeVisible();
+  await expect(page.getByText(/180 מעלות/)).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth + 1,
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "מתחילים לבשל", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "קודם מכינים את הכול" }),
+  ).toBeVisible();
+  const ingredient = page.getByRole("checkbox", { name: /3.2.*קמח/ });
+  await ingredient.click();
+  await expect(ingredient).toBeChecked();
+  await page.reload();
+  await expect(page.getByRole("checkbox", { name: /3.2.*קמח/ })).toBeChecked();
+  await page.screenshot({
+    path: "test-results/mobile-cooking.png",
+    fullPage: true,
+  });
+});
+test("private source gallery, server thumbnails, image zoom and mobile navigation work", async ({
+  page,
+}) => {
+  test.skip(!recipeId, "requires creation test");
+  const bytes = await sharp({
+    create: { width: 1200, height: 1800, channels: 3, background: "#9d7450" },
+  })
+    .png()
+    .toBuffer();
+  const mediaResponse = await page.request.post("/api/media", {
+    multipart: {
+      file: {
+        name: "synthetic-source.png",
+        mimeType: "image/png",
+        buffer: bytes,
+      },
+    },
+  });
+  expect(mediaResponse.ok()).toBe(true);
+  const m = await mediaResponse.json();
+  expect(
+    (
+      await page.request.post(`/api/recipes/${recipeId}/media`, {
+        data: { media_id: m.id, primary: false, position: 0 },
+      })
+    ).ok(),
+  ).toBe(true);
+  await page.goto("/#/recipes/" + recipeId);
+  await page.getByRole("button", { name: "פתיחת מדיה", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "הגלריה שלי" })).toBeVisible();
+  const zoom = page.getByRole("slider");
+  await zoom.fill("200");
+  expect(
+    await page
+      .locator(".k-zoom img")
+      .evaluate(
+        (img: HTMLImageElement) => img.complete && img.naturalWidth === 1200,
+      ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "סגירה", exact: true }).click();
+  await page.getByRole("button", { name: "קניות", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "בדרך לקניות" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "עוד", exact: true }).click();
+  await expect(
+    page.getByText("לא הוגדר מפתח OpenAI API בשרת.", { exact: false }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth + 1,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: "test-results/mobile-settings.png",
+    fullPage: true,
+  });
+});
+test("unverified browser cannot access media or charge AI", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 360, height: 780 },
+  });
+  const page = await context.newPage();
+  expect((await context.request.get("/api/recipes")).status()).toBe(401);
+  expect(
+    (
+      await context.request.post("/api/ai/search", {
+        data: { query: "עוגה" },
+        headers: { "Idempotency-Key": "anonymous-test" },
+      })
+    ).status(),
+  ).toBe(401);
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: /ברוכים הבאים/ }),
+  ).toBeVisible();
+  await context.close();
+});
+test("mobile validation errors stay visible inside the open editor instead of reporting a false save", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "מתכון חדש", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "מתכון חדש" });
+  await dialog
+    .getByRole("button", { name: "אישור ושמירת מתכון", exact: true })
+    .click();
+  await expect(dialog.getByRole("status")).toContainText(
+    "המתכון דורש השלמה לפני אישור",
+  );
+  await expect(dialog).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth + 1,
+    ),
+  ).toBe(true);
+});
