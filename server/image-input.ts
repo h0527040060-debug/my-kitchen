@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { mediaLimits } from "./limits.ts";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,9 +7,11 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const exec = promisify(execFile);
 export async function normalizedImage(bytes: Buffer): Promise<Buffer> {
-  const meta = await sharp(bytes, { limitInputPixels: 80_000_000 }).metadata();
+  const meta = await sharp(bytes, {
+    limitInputPixels: mediaLimits().image_pixels,
+  }).metadata();
   try {
-    return await sharp(bytes, { limitInputPixels: 80_000_000 })
+    return await sharp(bytes, { limitInputPixels: mediaLimits().image_pixels })
       .rotate()
       .png()
       .toBuffer();
@@ -23,7 +26,9 @@ export async function normalizedImage(bytes: Buffer): Promise<Buffer> {
         timeout: 60000,
         maxBuffer: 1024 * 1024,
       });
-      return sharp(await readFile(output), { limitInputPixels: 80_000_000 })
+      return sharp(await readFile(output), {
+        limitInputPixels: mediaLimits().image_pixels,
+      })
         .rotate()
         .png()
         .toBuffer();

@@ -26,4 +26,4 @@ GitHub Free מאפשר מאגרי קוד פרטיים ללא הגבלה, ולכ�
 
 מקורות: [מכסות וחיוב](https://supabase.com/docs/guides/platform/billing-on-supabase), [עצירה בחוסר פעילות](https://supabase.com/docs/guides/platform/free-project-pausing).
 
-החבילה המקומית כוללת PostgreSQL ואחסון קבצים מתמשך ואינה דורשת מנוי חדש. לפני גישה קבועה מטלפון צריך לבחור שרת עם HTTPS, נפח לאוסף וגיבוי. ניתן לבחור Supabase למסד בהמשך ולהעביר קבצים לאחסון פרטי מתאים. OpenAI API הוא חיוב נפרד ואינו כלול במנוי GitHub, Supabase או ChatGPT.
+המסלול המועדף כעת הוא ענן חינמי בלבד: Render Free בסביבת עבודה ללא אמצעי תשלום, ופרויקט Supabase ייעודי למסד ולמדיה פרטית. הוכנה תצורה ב־render.yaml; טרם בוצעה פריסה. יש שינה, מכסות משותפות ותקרת מדיה נמוכה, והעיבוד עשוי להמתין להתעוררות. [הנחיות ומגבלות](CLOUD-FREE.md). החבילה המקומית נשארת חלופה לפיתוח. OpenAI API הוא חיוב נפרד ואינו כלול במנוי GitHub, Supabase או ChatGPT.

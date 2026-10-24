@@ -38,6 +38,9 @@ export class S3Store implements ObjectStore {
       region: process.env.S3_REGION || "us-east-1",
       endpoint: process.env.S3_ENDPOINT || undefined,
       forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
+      maxAttempts: 2,
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      requestHandler: { connectionTimeout: 10000, requestTimeout: 60000 },
     });
     this.bucket = process.env.S3_BUCKET!;
   }

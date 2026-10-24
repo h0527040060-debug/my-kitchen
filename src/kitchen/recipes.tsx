@@ -438,6 +438,7 @@ export function RecipeHome() {
   );
 }
 export function RecipeDetail({ id }: { id: string }) {
+  const settings = useResource<any>("/settings");
   const { data, error, loading, reload } = useResource<any>(
     "/recipes/" + id,
     5000,
@@ -700,7 +701,9 @@ export function RecipeDetail({ id }: { id: string }) {
           />
         </label>
         <p className="k-note">
-          תמונה עד 25MB, סרטון עד 150MB ו־30 דקות, הקלטה עד 20MB.
+          {settings.data?.limits
+            ? `תמונה עד ${settings.data.limits.image_mb}MB, סרטון עד ${settings.data.limits.video_mb}MB ו־${settings.data.limits.video_minutes} דקות, הקלטה עד ${settings.data.limits.audio_mb}MB.`
+            : "מגבלות המדיה נטענות מהשרת."}
         </p>
         <button className="button outline" onClick={() => setImageMode(true)}>
           <ImagePlus size={17} /> שיפור או יצירת תמונה

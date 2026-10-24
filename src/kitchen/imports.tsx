@@ -24,6 +24,8 @@ const statuses: Record<string, string> = {
 };
 export function Imports() {
   const { data, error, loading, reload } = useResource<any>("/imports", 4000);
+  const settings = useResource<any>("/settings");
+  const limits = settings.data?.limits;
   const { run, busy, notify } = useAction();
   const [uploads, setUploads] = useState<{ name: string; status: string }[]>(
       [],
@@ -75,7 +77,12 @@ export function Imports() {
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(3, chosen.length) }, next));
+    await Promise.all(
+      Array.from(
+        { length: Math.min(limits?.upload_concurrency ?? 1, chosen.length) },
+        next,
+      ),
+    );
   }
   function pathFor(item: any) {
     return (
@@ -126,9 +133,15 @@ export function Imports() {
           </label>
         </div>
         <small>
-          עד 25MB לתמונה. שלוש העלאות במקביל. קבצים שטרם הועלו עשויים לדרוש
-          בחירה מחדש אחרי סגירת הדפדפן. לאחר העלאה, העיבוד ממשיך בשרת.
+          {limits
+            ? `עד ${limits.image_mb}MB לתמונה. עד ${limits.upload_concurrency} העלאות במקביל. `
+            : "מגבלות הקבצים נטענות מהשרת. "}
+          קבצים שטרם הועלו עשויים לדרוש בחירה מחדש אחרי סגירת הדפדפן. לאחר
+          העלאה, התור נשמר בשרת.
         </small>
+        {settings.data?.hosting?.notice && (
+          <p className="k-note">{settings.data.hosting.notice}</p>
+        )}
       </section>
       {uploads.length > 0 && (
         <details className="k-panel" open>

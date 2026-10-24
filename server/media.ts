@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import sharp, { type Metadata } from "sharp";
 import { normalizedImage } from "./image-input.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -11,9 +11,12 @@ import { db } from "./db.ts";
 import { store, type ObjectStore } from "./storage.ts";
 import { enqueue } from "./jobs.ts";
 import { HttpError } from "./errors.ts";
+import { mediaLimits } from "./limits.ts";
 const exec = promisify(execFile);
-const MAX_IMAGE = 25 * 1024 * 1024,
-  MAX_VIDEO = 150 * 1024 * 1024;
+if (process.env.CLOUD_PROFILE === "render-free") {
+  sharp.concurrency(1);
+  sharp.cache({ memory: 16, files: 0, items: 16 });
+}
 export async function registerMedia(
   tx: Db,
   bytes: Buffer,
@@ -22,6 +25,7 @@ export async function registerMedia(
   extra: Record<string, unknown> = {},
   objectStore: ObjectStore = store,
 ) {
+  const limits = mediaLimits();
   const digest = createHash("sha256").update(bytes).digest("hex");
   const existing = await tx.query(
     "select * from kitchen.media where digest=$1 and origin=$2",
@@ -36,10 +40,19 @@ export async function registerMedia(
   let kind: string,
     actualMime = mime;
   if (mime.startsWith("image/")) {
-    if (bytes.length > MAX_IMAGE) throw new HttpError(400, "תמונה עד 25MB");
-    const meta = await sharp(bytes, {
-      limitInputPixels: 80_000_000,
-    }).metadata();
+    if (bytes.length > limits.image_mb * 1024 * 1024)
+      throw new HttpError(400, `תמונה עד ${limits.image_mb}MB`);
+    let meta: Metadata;
+    try {
+      meta = await sharp(bytes, {
+        limitInputPixels: limits.image_pixels,
+      }).metadata();
+    } catch {
+      throw new HttpError(
+        400,
+        `התמונה אינה ניתנת לקריאה או חורגת ממגבלת ${limits.image_pixels / 1_000_000} מגה־פיקסלים`,
+      );
+    }
     if (
       !meta.width ||
       !["jpeg", "png", "webp", "heif", "avif", "tiff"].includes(meta.format)
@@ -48,7 +61,8 @@ export async function registerMedia(
     actualMime = meta.format === "jpeg" ? "image/jpeg" : `image/${meta.format}`;
     kind = "image";
   } else if (mime.startsWith("video/")) {
-    if (bytes.length > MAX_VIDEO) throw new HttpError(400, "סרטון עד 150MB");
+    if (bytes.length > limits.video_mb * 1024 * 1024)
+      throw new HttpError(400, `סרטון עד ${limits.video_mb}MB`);
     if (
       bytes.subarray(4, 8).toString() !== "ftyp" &&
       bytes.subarray(0, 4).toString("hex") !== "1a45dfa3"
@@ -56,8 +70,8 @@ export async function registerMedia(
       throw new HttpError(400, "פורמט הסרטון אינו נתמך");
     kind = "video";
   } else if (mime.startsWith("audio/")) {
-    if (bytes.length > 20 * 1024 * 1024)
-      throw new HttpError(400, "הקלטה עד 20MB");
+    if (bytes.length > limits.audio_mb * 1024 * 1024)
+      throw new HttpError(400, `הקלטה עד ${limits.audio_mb}MB`);
     const head = bytes.subarray(0, 12);
     if (
       !["RIFF", "OggS"].includes(head.subarray(0, 4).toString()) &&
@@ -91,6 +105,7 @@ export async function registerMedia(
   return { ...r.rows[0], duplicate: false };
 }
 export async function processMedia(mediaId: string) {
+  const limits = mediaLimits();
   const r = await db.query("select * from kitchen.media where id=$1", [
     mediaId,
   ]);
@@ -106,7 +121,9 @@ export async function processMedia(mediaId: string) {
       ["display", 1600, 85],
       ["readable", 3200, 95],
     ] as const) {
-      const out = await sharp(normalized, { limitInputPixels: 80_000_000 })
+      const out = await sharp(normalized, {
+        limitInputPixels: limits.image_pixels,
+      })
         .resize(size, size, { fit: "inside", withoutEnlargement: true })
         .webp({ quality })
         .toBuffer();
@@ -125,17 +142,33 @@ export async function processMedia(mediaId: string) {
       await writeFile(input, bytes);
       const probe = await exec(
         "ffprobe",
-        ["-v", "error", "-show_format", "-show_streams", "-of", "json", input],
+        [
+          "-v",
+          "error",
+          "-protocol_whitelist",
+          "file,pipe",
+          "-show_format",
+          "-show_streams",
+          "-of",
+          "json",
+          input,
+        ],
         { timeout: 30000, maxBuffer: 1024 * 1024 },
       );
       const info = JSON.parse(probe.stdout);
       const duration = Number(info.format?.duration);
-      if (!Number.isFinite(duration) || duration > 1800)
-        throw Error("סרטון חייב להיות באורך עד 30 דקות");
+      if (!Number.isFinite(duration) || duration > limits.video_minutes * 60)
+        throw Error(`סרטון חייב להיות באורך עד ${limits.video_minutes} דקות`);
       await exec(
         "ffmpeg",
         [
           "-y",
+          "-protocol_whitelist",
+          "file,pipe",
+          "-threads",
+          "1",
+          "-filter_threads",
+          "1",
           "-i",
           input,
           "-map",
@@ -146,6 +179,8 @@ export async function processMedia(mediaId: string) {
           "scale=trunc(min(1280\\,iw)/2)*2:-2",
           "-c:v",
           "libx264",
+          "-threads",
+          "1",
           "-preset",
           "fast",
           "-crf",
@@ -204,7 +239,7 @@ export async function processMedia(mediaId: string) {
           "-i",
           input,
           "-t",
-          "601",
+          String(limits.audio_minutes * 60 + 1),
           "-vn",
           "-ac",
           "1",
@@ -225,8 +260,8 @@ export async function processMedia(mediaId: string) {
       );
       const info = JSON.parse(result.stdout),
         duration = Number(info.format?.duration);
-      if (!Number.isFinite(duration) || duration > 600)
-        throw Error("הקלטה חייבת להיות באורך עד 10 דקות");
+      if (!Number.isFinite(duration) || duration > limits.audio_minutes * 60)
+        throw Error(`הקלטה חייבת להיות באורך עד ${limits.audio_minutes} דקות`);
       const key = `derived/${media.id}/audio.mp3`;
       await store.put(key, await readFile(output), "audio/mpeg");
       derivatives.audio = key;
@@ -253,7 +288,7 @@ export async function imageForVision(
   const m = r.rows[0];
   if (!m || m.kind !== "image") throw Error("מקור חייב להיות תמונה");
   let image = sharp(await normalizedImage(await store.get(m.object_key)), {
-    limitInputPixels: 80_000_000,
+    limitInputPixels: mediaLimits().image_pixels,
   });
   if (crop) image = image.extract(crop);
   return image

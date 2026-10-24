@@ -1,0 +1,48 @@
+# One Free web service. No paid worker, disk, or expiring Render database.
+services:
+  - type: web
+    name: my-kitchen
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node --experimental-strip-types server/cloud.ts
+    healthCheckPath: /api/health
+    envVars:
+      - key: CLOUD_PROFILE
+        value: render-free
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=128
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: "true"
+      - key: DATABASE_POOL_SIZE
+        value: "3"
+      - key: STORAGE_DRIVER
+        value: s3
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        value: "true"
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: OWNER_EMAIL
+        sync: false
+      - key: OWNER_PASSWORD
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      - key: MEDIA_ROOT
+        value: /app/data/media
+      - key: UPLOAD_TMP
+        value: /app/data/uploads
+      - key: AI_DAILY_MAX_CALLS
+        value: "0"

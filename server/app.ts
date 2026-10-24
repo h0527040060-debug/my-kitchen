@@ -34,6 +34,7 @@ import { modelConfig } from "./ai.ts";
 import { fieldSources } from "../shared/provenance.ts";
 import { prices } from "./pricing.ts";
 import { measurementPreferences, insertShoppingLine } from "./shopping.ts";
+import { mediaLimits, hostingInfo } from "./limits.ts";
 const uuid = z.string().uuid(),
   contentSchema = RecipeContentSchema;
 const recipeSave = z.object({
@@ -166,12 +167,8 @@ export function createApp() {
             ? "עלות משוערת לפי טבלת המחירים שהוגדרה; אינה חיוב הספק בפועל"
             : "אין תעריפים מאומתים מוגדרים; ספירת קריאות אינה חיוב בפועל",
         },
-        limits: {
-          image_mb: 25,
-          video_mb: 150,
-          video_minutes: 30,
-          upload_concurrency: 3,
-        },
+        limits: mediaLimits(),
+        hosting: hostingInfo(),
       };
     }),
   );
@@ -693,7 +690,17 @@ export function createApp() {
   );
   const upload = multer({
     dest: process.env.UPLOAD_TMP || "data/uploads",
-    limits: { files: 1, fileSize: 150 * 1024 * 1024 },
+    limits: {
+      files: 1,
+      fileSize:
+        Math.max(
+          mediaLimits().image_mb,
+          mediaLimits().video_mb,
+          mediaLimits().audio_mb,
+        ) *
+        1024 *
+        1024,
+    },
   });
   app.post(
     "/api/media",

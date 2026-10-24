@@ -6,14 +6,29 @@ export interface Db {
     params?: any[],
   ): Promise<{ rows: T[]; rowCount?: number | null }>;
 }
-export const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 10,
-  ssl:
-    process.env.DATABASE_SSL === "true"
-      ? { rejectUnauthorized: true }
-      : undefined,
-});
+export function databasePoolConfig(env: NodeJS.ProcessEnv): pg.PoolConfig {
+  let connectionString = env.DATABASE_URL;
+  if (env.DATABASE_SSL === "true" && connectionString) {
+    const url = new URL(connectionString);
+    for (const key of ["ssl", "sslmode", "sslrootcert", "sslcert", "sslkey"])
+      url.searchParams.delete(key);
+    connectionString = url.toString();
+  }
+  return {
+    connectionString,
+    max: Math.min(20, Math.max(1, Number(env.DATABASE_POOL_SIZE) || 10)),
+    ssl:
+      env.DATABASE_SSL === "true"
+        ? {
+            rejectUnauthorized: true,
+            ...(env.DATABASE_CA_PEM
+              ? { ca: env.DATABASE_CA_PEM.replaceAll("\\n", "\n") }
+              : {}),
+          }
+        : undefined,
+  };
+}
+export const pool = new pg.Pool(databasePoolConfig(process.env));
 export const db: Db = pool;
 export async function transaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
   const client = await pool.connect();

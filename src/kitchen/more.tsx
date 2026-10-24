@@ -88,6 +88,9 @@ export function More() {
       </section>
       <section className="k-panel">
         <h2>מנועי AI ושימוש</h2>
+        {data?.hosting?.notice && (
+          <p className="k-note">{data.hosting.notice}</p>
+        )}
         {data && (
           <>
             <p className={data.ai.configured ? "k-note" : "k-alert"}>

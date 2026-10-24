@@ -9,6 +9,7 @@ import sharp from "sharp";
 import { db, pool, migrate, transaction } from "../server/db.ts";
 import { createApp } from "../server/app.ts";
 import { createOwner } from "../server/auth.ts";
+import { ensureCloudOwner } from "../server/cloud-config.ts";
 import { recipe } from "./fixture.ts";
 import { enqueue, claim, recoverExpired, runOne } from "../server/jobs.ts";
 import { categoryPaths } from "../server/recipes.ts";
@@ -28,7 +29,24 @@ process.env.AI_DAILY_MAX_CALLS = "0";
 test("real PostgreSQL API, worker recovery, owner security and full media restore", async (t) => {
   await db.query("drop schema if exists kitchen cascade");
   await migrate();
-  await createOwner(db, "owner@example.test", "test-only-password-12345");
+  assert.equal(
+    await transaction((tx) =>
+      ensureCloudOwner(tx, {
+        OWNER_EMAIL: "owner@example.test",
+        OWNER_PASSWORD: "test-only-password-12345",
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    await transaction((tx) =>
+      ensureCloudOwner(tx, {
+        OWNER_EMAIL: "other@example.test",
+        OWNER_PASSWORD: "must-not-overwrite-12345",
+      }),
+    ),
+    false,
+  );
   const server = createApp().listen(0, "127.0.0.1");
   await new Promise<void>((r) => server.once("listening", () => r()));
   const origin = "http://127.0.0.1:" + (server.address() as any).port;
@@ -92,6 +110,32 @@ test("real PostgreSQL API, worker recovery, owner security and full media restor
           body: "{}",
         });
         assert.equal(csrf.status, 403);
+      },
+    );
+    await t.test(
+      "free-cloud limits are reported to the client and oversized uploads are rejected before object storage",
+      async () => {
+        const previous = process.env.CLOUD_PROFILE;
+        try {
+          process.env.CLOUD_PROFILE = "render-free";
+          const settings = await request("/settings");
+          assert.equal(settings.data.limits.image_mb, 10);
+          assert.equal(settings.data.limits.upload_concurrency, 1);
+          assert.equal(settings.data.hosting.may_sleep, true);
+          await assert.rejects(
+            () =>
+              registerMedia(
+                db,
+                Buffer.alloc(10 * 1024 * 1024 + 1),
+                "image/png",
+                "personal",
+              ),
+            (e: any) => e.status === 400,
+          );
+        } finally {
+          if (previous === undefined) delete process.env.CLOUD_PROFILE;
+          else process.env.CLOUD_PROFILE = previous;
+        }
       },
     );
     let rid = "",
