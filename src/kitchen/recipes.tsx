@@ -92,7 +92,7 @@ export function RecipeHome() {
       <h1 className="k-sr-only">המתכונים שלי</h1>
       {cooking.data?.items
         .filter((c: any) => c.state === "active")
-        .slice(0, 3)
+        .slice(0, 1)
         .map((c: any) => (
           <button
             key={c.id}
