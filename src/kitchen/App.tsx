@@ -1,3 +1,5 @@
+import { DesignChooser, type KitchenDesign } from "./designs.tsx";
+import { InstallPrompt } from "./install.tsx";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -26,6 +28,17 @@ import { More } from "./more.tsx";
 import "./kitchen.css";
 import { AccountRecovery } from "./account.tsx";
 export default function KitchenApp() {
+  const preview =
+    window.location.pathname === "/designs" ||
+    new URLSearchParams(window.location.search).has("design");
+  const requestedDesign = new URLSearchParams(window.location.search).get(
+    "design",
+  );
+  const [design, setDesign] = useState<KitchenDesign>(
+    ["sage", "night", "paper"].includes(requestedDesign ?? "")
+      ? (requestedDesign as KitchenDesign)
+      : "sage",
+  );
   const [session, setSession] = useState<any>(null),
     [ready, setReady] = useState(false),
     [error, setError] = useState(""),
@@ -56,6 +69,23 @@ export default function KitchenApp() {
       window.removeEventListener("kitchen-signed-out", logout);
     };
   }, []);
+  useEffect(() => {
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute(
+        "content",
+        { sage: "#52664c", night: "#121b16", paper: "#ffffff" }[design],
+      );
+  }, [design]);
+  useEffect(() => {
+    if (!session || preview) return;
+    api("/settings")
+      .then((s: any) => {
+        if (["sage", "night", "paper"].includes(s.preferences.interface_design))
+          setDesign(s.preferences.interface_design);
+      })
+      .catch(() => {});
+  }, [session?.email, preview]);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 10000);
@@ -97,7 +127,19 @@ export default function KitchenApp() {
       );
   return (
     <NoticeContext value={setNotice}>
-      <div className="kitchen">
+      <div className="kitchen" data-design={design}>
+        {preview && (
+          <DesignChooser
+            design={design}
+            change={(id) => {
+              setDesign(id);
+              const url = new URL(window.location.href);
+              url.searchParams.set("design", id);
+              window.history.replaceState({}, "", url);
+            }}
+            selected={setDesign}
+          />
+        )}
         <a className="skip-link" href="#k-main">
           דילוג לתוכן
         </a>
@@ -108,6 +150,19 @@ export default function KitchenApp() {
               המטבח שלי<span>קצת השראה, הרבה טעם</span>
             </span>
           </a>
+          {session && (
+            <button
+              className="k-icon k-header-add"
+              aria-label="מתכון חדש"
+              onClick={() => {
+                if (tab === "recipes" && !id)
+                  window.dispatchEvent(new Event("kitchen-add-recipe"));
+                else go("/recipes?new=1");
+              }}
+            >
+              <Plus size={24} />
+            </button>
+          )}
           {session && (
             <button
               className="k-icon"
@@ -125,6 +180,7 @@ export default function KitchenApp() {
             </button>
           )}
         </header>
+        <InstallPrompt />
         <main id="k-main" className="k-main">
           {content}
         </main>

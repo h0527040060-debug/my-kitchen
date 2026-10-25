@@ -1,3 +1,5 @@
+import { InstallHelp, isAndroid } from "./install.tsx";
+import { CategoryPicture } from "./categories.tsx";
 import { useState } from "react";
 import { api, go, upload, mediaUrl } from "./api.ts";
 import {
@@ -5,31 +7,40 @@ import {
   useResource,
   PageTitle,
   MediaImage,
-  JobResult,
   Dialog,
 } from "./ui.tsx";
 import { CategoryPicker } from "./editor.tsx";
 import { AccountSettings } from "./account.tsx";
 export function More() {
-  const [account, setAccount] = useState(false);
+  const [account, setAccount] = useState(false),
+    [installHelp, setInstallHelp] = useState(false);
   const { data, reload } = useResource<any>("/settings");
   const categories = useResource<any>("/categories", 5000);
-  const jobs = useResource<any>("/jobs", 5000);
   const cooking = useResource<any>("/cooking");
   const sources = useResource<any>("/sources");
   const { run, busy, notify } = useAction();
   const [category, setCategory] = useState<any>(null),
-    [createCat, setCreateCat] = useState(false),
-    [check, setCheck] = useState<string | null>(null),
-    [expandedJob, setExpandedJob] = useState<string | null>(null);
+    [createCat, setCreateCat] = useState(false);
+
   const [packageWeights, setPackageWeights] = useState<string | null>(null);
   return (
     <>
       <PageTitle
         title="עוד קצת במטבח"
-        subtitle="מצרכים בבית, קטגוריות, שימוש AI והיסטוריה."
+        subtitle="מצרכים בבית, קטגוריות, העדפות והיסטוריה."
       />
       <div className="k-actions">
+        <a className="button outline" href="/designs">
+          בחירה בין שלושה עיצובים
+        </a>
+        {isAndroid() && (
+          <button
+            className="button outline"
+            onClick={() => setInstallHelp(true)}
+          >
+            התקנה במסך הבית
+          </button>
+        )}
         <button className="button outline" onClick={() => setAccount(true)}>
           ניהול החשבון
         </button>
@@ -67,6 +78,19 @@ export function More() {
       <section className="k-panel">
         <div className="k-subtitle">
           <h2>עץ הקטגוריות שלי</h2>
+          <button
+            className="button outline"
+            disabled={busy}
+            onClick={() =>
+              run(async () => {
+                await api("/categories/starter", "POST", { confirmed: true });
+                categories.reload();
+                notify("עץ הקטגוריות הושלם ותמונות הנושא בתור");
+              })
+            }
+          >
+            השלמת עץ הקטגוריות
+          </button>
           <button className="button outline" onClick={() => setCreateCat(true)}>
             קטגוריה חדשה
           </button>
@@ -78,201 +102,95 @@ export function More() {
         <div className="k-category-grid">
           {categories.data?.items.map((c: any) => (
             <button key={c.id} onClick={() => setCategory(c)}>
-              <MediaImage id={c.media_id} />
+              <CategoryPicture
+                category={c}
+                all={categories.data?.items ?? []}
+              />
               <span>{c.name}</span>
               <small>
                 {c.media_id
                   ? c.manual_image
                     ? "תמונה אישית"
                     : "תמונת המחשה AI"
-                  : "תמונה ממתינה"}
+                  : "תמונת המחשה AI"}
               </small>
             </button>
           ))}
         </div>
       </section>
+
       <section className="k-panel">
-        <h2>מנועי AI ושימוש</h2>
-        {data?.hosting?.notice && (
-          <p className="k-note">{data.hosting.notice}</p>
-        )}
+        <h2>מידות והעדפות</h2>
         {data && (
-          <>
-            <p className={data.ai.configured ? "k-note" : "k-alert"}>
-              {data.ai.configured
-                ? "מפתח API מוגדר בשרת — זמינות המודלים והפעולות דורשת בדיקה"
-                : "לא הוגדר מפתח OpenAI API בשרת. המתכונים, החישובים והבישול נשארים זמינים."}
-            </p>
-            <dl>
-              {Object.entries(data.ai.models).map(([k, v]) => (
-                <div key={k}>
-                  <dt>
-                    {(
-                      {
-                        vision: "חילוץ מתמונות",
-                        assistant: "עוזר וחיפוש",
-                        generate: "יצירת תמונות",
-                        edit: "עריכת תמונות",
-                        transcribe: "תמלול קולי",
-                        speech: "הקראה קולית",
-                        visionEffort: "מאמץ חילוץ",
-                        assistantEffort: "מאמץ עוזר",
-                        imageQuality: "איכות תמונה",
-                        editQuality: "איכות עריכה",
-                      } as any
-                    )[k] || k}
-                  </dt>
-                  <dd dir="auto">{String(v)}</dd>
-                </div>
-              ))}
-            </dl>
-            <p>מגבלת שרת: {data.ai.daily_max_calls} קריאות AI ביממה (UTC).</p>
-            <p className="k-note">
-              {data.ai.cost_note}
-              {data.ai.estimated_cost !== null
-                ? " · סה״כ הערכה: $" + Number(data.ai.estimated_cost).toFixed(4)
-                : ""}
-            </p>
-            {data.ai.usage.reduce((n: number, u: any) => n + u.count, 0) >=
-              data.ai.daily_max_calls * 0.8 &&
-              data.ai.daily_max_calls > 0 && (
-                <p className="k-alert">
-                  נוצלו לפחות 80% ממכסת הקריאות היומית. הפעולות יושהו בהגעה
-                  למגבלה.
-                </p>
-              )}
-            <button
-              className="button outline"
-              disabled={busy}
-              onClick={() =>
-                run(async () => {
-                  const j = await api(
-                    "/ai/check",
-                    "POST",
-                    {},
-                    crypto.randomUUID(),
-                  );
-                  setCheck(j.id);
-                })
-              }
-            >
-              בדיקת גישה למודלים שהוגדרו
-            </button>
-            {check && <JobResult jobId={check} />}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const f = new FormData(e.currentTarget);
-                run(async () => {
-                  await api("/settings", "PUT", {
-                    ai_daily_limit: Number(f.get("limit")),
-                    cup_ml: f.get("cup") ? Number(f.get("cup")) : null,
-                    package_weights:
-                      packageWeights === null
-                        ? (data.preferences.package_weights ?? {})
-                        : Object.fromEntries(
-                            packageWeights
-                              .split("\n")
-                              .filter(Boolean)
-                              .map((line) => {
-                                const [name, weight] = line.split("=");
-                                if (
-                                  !name?.trim() ||
-                                  !Number.isFinite(Number(weight)) ||
-                                  Number(weight) <= 0
-                                )
-                                  throw Error(
-                                    "יש להזין שם מצרך = משקל בגרמים, בכל שורה",
-                                  );
-                                return [name.trim(), Number(weight)];
-                              }),
-                          ),
-                  });
-                  reload();
-                  notify("ההעדפות נשמרו בשרת");
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const f = new FormData(e.currentTarget);
+              run(async () => {
+                await api("/settings", "PUT", {
+                  ai_daily_limit: 0,
+                  cup_ml: f.get("cup") ? Number(f.get("cup")) : null,
+                  package_weights:
+                    packageWeights === null
+                      ? (data.preferences.package_weights ?? {})
+                      : Object.fromEntries(
+                          packageWeights
+                            .split("\n")
+                            .filter(Boolean)
+                            .map((line) => {
+                              const [name, weight] = line.split("=");
+                              if (
+                                !name?.trim() ||
+                                !Number.isFinite(Number(weight)) ||
+                                Number(weight) <= 0
+                              )
+                                throw Error(
+                                  "יש להזין שם מצרך = משקל בגרמים, בכל שורה",
+                                );
+                              return [name.trim(), Number(weight)];
+                            }),
+                        ),
                 });
-              }}
-            >
-              <div className="k-grid-2">
-                <label>
-                  המגבלה האישית שלי, קריאות ליום
-                  <input
-                    name="limit"
-                    type="number"
-                    min="0"
-                    defaultValue={
-                      data.preferences.ai_daily_limit ?? data.ai.daily_max_calls
-                    }
-                  />
-                </label>
-                <label>
-                  נפח כוס במ״ל, אם הוגדר
-                  <input
-                    name="cup"
-                    type="number"
-                    min="1"
-                    max="1000"
-                    defaultValue={data.preferences.cup_ml ?? ""}
-                  />
-                </label>
-              </div>
-              <label>
-                משקל אריזה בגרמים — העדפה אישית, כל מצרך בשורה
-                <textarea
-                  value={
-                    packageWeights ??
-                    Object.entries(data.preferences.package_weights ?? {})
-                      .map(([name, weight]) => name + "=" + weight)
-                      .join("\n")
-                  }
-                  onChange={(e) => setPackageWeights(e.target.value)}
-                  placeholder={"חמאה=200\nקמח=1000"}
-                />
-              </label>
-              <p className="k-note">
-                ההגדרה נשמרת כהעדפה. כוס אינה מומרת לגרמים בלי מידע מתאים למצרך.
-              </p>
-              <button className="button primary" disabled={busy}>
-                שמירת העדפות
-              </button>
-            </form>
-            <h3>הקריאות שנרשמו היום</h3>
-            {data.ai.usage.map((u: any, i: number) => (
-              <p key={i}>
-                {u.operation} · {u.model} · {u.status} · {u.count} קריאות
-              </p>
-            ))}
-          </>
-        )}
-      </section>
-      <section className="k-panel">
-        <h2>עבודות שרת אחרונות</h2>
-        {jobs.data?.items.slice(0, 30).map((j: any) => (
-          <details
-            key={j.id}
-            onToggle={(e) => {
-              if (e.currentTarget.open) setExpandedJob(j.id);
-              else setExpandedJob((p) => (p === j.id ? null : p));
+                reload();
+                notify("ההעדפות נשמרו בשרת");
+              });
             }}
           >
-            <summary>
-              {j.operation} ·{" "}
-              {(
-                {
-                  succeeded: "הושלם",
-                  queued: "ממתין",
-                  running: "מעבד",
-                  blocked: "ממתין לחיבור או למכסה",
-                  uncertain: "תוצאה לא ודאית",
-                  failed: "נכשל",
-                } as any
-              )[j.status] || j.status}
-            </summary>
-            <p>{j.error}</p>
-            {expandedJob === j.id && <JobResult jobId={j.id} />}
-          </details>
-        ))}
+            <div className="k-grid-2">
+              <label>
+                נפח כוס במ״ל, אם הוגדר
+                <input
+                  name="cup"
+                  type="number"
+                  min="1"
+                  max="1000"
+                  defaultValue={data.preferences.cup_ml ?? ""}
+                />
+              </label>
+            </div>
+            <label>
+              משקל אריזה בגרמים — העדפה אישית, כל מצרך בשורה
+              <textarea
+                value={
+                  packageWeights ??
+                  Object.entries(data.preferences.package_weights ?? {})
+                    .map(([name, weight]) => name + "=" + weight)
+                    .join("\n")
+                }
+                onChange={(e) => setPackageWeights(e.target.value)}
+                placeholder={"חמאה=200\nקמח=1000"}
+              />
+            </label>
+            <p className="k-note">
+              ההגדרה נשמרת כהעדפה. כוס אינה מומרת לגרמים בלי מידע מתאים למצרך.
+            </p>
+            <button className="button primary" disabled={busy}>
+              שמירת העדפות
+            </button>
+          </form>
+        )}
       </section>
+
       <section className="k-panel">
         <h2>ממי המתכון?</h2>
         <p className="k-note">
@@ -332,6 +250,7 @@ export function More() {
           changed={categories.reload}
         />
       )}
+      {installHelp && <InstallHelp close={() => setInstallHelp(false)} />}
       {account && <AccountSettings close={() => setAccount(false)} />}
     </>
   );
@@ -350,13 +269,10 @@ function CategoryManage({
   const [name, setName] = useState(c.name),
     [parent, setParent] = useState(c.parent_id ?? ""),
     [aliases, setAliases] = useState(c.aliases.join(", ")),
-    [prompt, setPrompt] = useState(""),
     [showLibrary, setShowLibrary] = useState(false),
     [libraryOffset, setLibraryOffset] = useState(0),
     [crop, setCrop] = useState({ left: 0, top: 0, width: 500, height: 500 }),
     [cropped, setCropped] = useState<string | null>(null),
-    [job, setJob] = useState<string | null>(null),
-    [imagePreview, setImagePreview] = useState<string | null>(null),
     [merge, setMerge] = useState("");
   const library = useResource<any>(
     showLibrary ? "/media?offset=" + libraryOffset : null,
@@ -578,85 +494,6 @@ function CategoryManage({
             ))}
           </div>
         </details>
-        <label>
-          הנחיה לשיפור או יצירה מחדש
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
-        </label>
-        <button
-          className="button outline"
-          disabled={busy}
-          onClick={() =>
-            run(async () => {
-              const j = await api(`/categories/${c.id}/image`, "POST", {
-                media_id: null,
-                regenerate: true,
-                prompt,
-              });
-              setJob(j.id);
-              changed();
-            })
-          }
-        >
-          יצירה מחדש לפי בקשתי
-        </button>
-        {c.media_id && (
-          <button
-            className="button outline"
-            disabled={busy}
-            onClick={() =>
-              run(async () => {
-                const j = await api(
-                  `/categories/${c.id}/edit-image`,
-                  "POST",
-                  { prompt },
-                  crypto.randomUUID(),
-                );
-                setJob(j.id);
-              })
-            }
-          >
-            שיפור תמונת הנושא הקיימת ב־AI
-          </button>
-        )}
-        {job && <JobResult jobId={job} onImage={setImagePreview} />}
-        {imagePreview && (
-          <>
-            <p className="k-note">
-              תמונת המחשה באמצעות AI. התמונה הקודמת נשמרת בהיסטוריה.
-            </p>
-            <MediaImage id={imagePreview} variant="original" />
-            <button
-              className="button primary"
-              disabled={busy}
-              onClick={() =>
-                run(async () => {
-                  await api(`/categories/${c.id}/image`, "POST", {
-                    media_id: imagePreview,
-                  });
-                  changed();
-                  close();
-                })
-              }
-            >
-              אישור החלפה לתמונת ההמחשה
-            </button>
-            <button
-              className="button quiet"
-              onClick={() => setImagePreview(null)}
-            >
-              ביטול
-            </button>
-          </>
-        )}
-      </fieldset>
-      <fieldset>
-        <legend>איחוד ענפים</legend>
-        <p className="k-note">
-          השיוכים יעברו לענף שבחרת. המקורות והמתכונים לא יימחקו.
-        </p>
         <label>
           ענף יעד
           <select value={merge} onChange={(e) => setMerge(e.target.value)}>

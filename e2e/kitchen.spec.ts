@@ -33,7 +33,7 @@ test.beforeEach(async ({ page }) => {
     .getByRole("button", { name: "כניסה למטבח שלי", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "המטבח שלי", exact: true }),
+    page.getByRole("button", { name: "מתכון חדש", exact: true }),
   ).toBeVisible();
 });
 test("mobile owner creates a real server recipe and preserves a cooking checklist across reloads", async ({
@@ -135,7 +135,7 @@ test("private source gallery, server thumbnails, image zoom and mobile navigatio
   ).toBeVisible();
   await page.getByRole("button", { name: "עוד", exact: true }).click();
   await expect(
-    page.getByText("לא הוגדר מפתח OpenAI API בשרת.", { exact: false }),
+    page.getByRole("heading", { name: "מידות והעדפות", exact: true }),
   ).toBeVisible();
   expect(
     await page.evaluate(

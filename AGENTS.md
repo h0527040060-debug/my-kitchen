@@ -2,6 +2,8 @@
 
 This is the user's personal, single-owner Hebrew recipe application. Preserve existing work.
 
+- Provider-dependent product functions were explicitly removed on 2026-10-25: no paid assistant, semantic search, image generation/edit controls, API OCR or server audio. Do not re-enable these or add API-key setup flows without a new user request. Category images are prepared automatically from bundled AI illustration atlases, with no provider call.
+- Three mobile-only design previews are available at `/designs?design=sage`, `night`, or `paper`. Changing the preview is local; the explicit selection button persists `preferences.interface_design`.
 - Cloud hosting stays on Free plans. Do not enable a paid AI API, buy credits, or upgrade services without an explicit budget decision. `AI_DAILY_MAX_CALLS=0` is intentional.
 - For requests such as "process new recipes", "יש תמונות חדשות", "עבד את התמונות", or "הוסף למטבח שלי", read `docs/CHAT-IMPORT.md`. The supported workflow reads user images in ChatGPT Work, then imports structured drafts using existing authorized Drive and Neon connections. It does not call a model API.
 - Follow the provider-owned pagination tokens for Drive discovery. Process only the configured recipe folder and its subfolders; preserve privacy and media originals. Read every image used for extraction. Metadata is not extraction.

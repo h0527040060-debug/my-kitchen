@@ -119,7 +119,6 @@ export function MealDetail({ id }: { id: string }) {
   const [q, setQ] = useState(""),
     [search, setSearch] = useState(""),
     [target, setTarget] = useState<Record<string, string>>({}),
-    [suggestion, setSuggestion] = useState<string | null>(null),
     [prep, setPrep] = useState(false);
   const recipes = useResource<any>(
     "/recipes?q=" + encodeURIComponent(search) + "&limit=24",
@@ -157,23 +156,6 @@ export function MealDetail({ id }: { id: string }) {
       </p>
       <div className="k-actions">
         <button
-          className="button outline"
-          disabled={busy}
-          onClick={() =>
-            run(async () => {
-              const j = await api(
-                "/meals/" + id + "/suggest",
-                "POST",
-                {},
-                crypto.randomUUID(),
-              );
-              setSuggestion(j.id);
-            })
-          }
-        >
-          מה מבשלים? הצעת AI מהמאגר שלי
-        </button>
-        <button
           className="button primary"
           disabled={busy || !data.items.length}
           onClick={() =>
@@ -196,14 +178,7 @@ export function MealDetail({ id }: { id: string }) {
           מנהל הכנות משולב
         </button>
       </div>
-      {suggestion && (
-        <MealSuggestion
-          jobId={suggestion}
-          mealId={id}
-          revision={m.revision}
-          reload={reload}
-        />
-      )}
+
       <section className="k-panel">
         <h2>התפריט שלי</h2>
         {data.items.map((i: any) => (
@@ -489,97 +464,7 @@ function Preparation({
     </section>
   );
 }
-function MealSuggestion({
-  jobId,
-  mealId,
-  revision,
-  reload,
-}: {
-  jobId: string;
-  mealId: string;
-  revision: number;
-  reload: () => void;
-}) {
-  const [result, setResult] = useState<any>(null),
-    [selected, setSelected] = useState<string[]>([]),
-    [targets, setTargets] = useState<Record<string, string>>({});
-  const { run, busy } = useAction();
-  return (
-    <section className="k-panel">
-      <JobResult jobId={jobId} onDone={(j) => setResult(j.result)} />
-      {result && (
-        <>
-          <p className="k-note">
-            נבדקו {result.candidate_count} מועמדים מהמאגר. ההצעה אינה משנה את
-            התפריט בלי אישור.
-          </p>
-          {result.assumptions.map((a: string, i: number) => (
-            <p key={i}>{a}</p>
-          ))}
-          {result.questions.map((a: string, i: number) => (
-            <p className="k-alert" key={i}>
-              {a}
-            </p>
-          ))}
-          {result.items.map((i: any) => (
-            <fieldset key={i.recipe_id}>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={selected.includes(i.recipe_id)}
-                  onChange={() =>
-                    setSelected((p) =>
-                      p.includes(i.recipe_id)
-                        ? p.filter((id) => id !== i.recipe_id)
-                        : [...p, i.recipe_id],
-                    )
-                  }
-                />
-                {i.title}
-              </label>
-              <p>{i.reason}</p>
-              <label>
-                כמות לאישור ({i.yield?.unit ?? "חסרה תפוקה"})
-                <input
-                  value={targets[i.recipe_id] ?? i.target ?? ""}
-                  onChange={(e) =>
-                    setTargets({ ...targets, [i.recipe_id]: e.target.value })
-                  }
-                />
-              </label>
-            </fieldset>
-          ))}
-          <button
-            className="button primary"
-            disabled={busy || !selected.length}
-            onClick={() =>
-              run(async () => {
-                await api(`/meals/${mealId}/accept-suggestion`, "POST", {
-                  job_id: jobId,
-                  revision,
-                  confirmed: true,
-                  items: selected.map((id) => ({
-                    recipe_id: id,
-                    target:
-                      targets[id] ??
-                      result.items.find((i: any) => i.recipe_id === id)
-                        .target ??
-                      "",
-                  })),
-                });
-                setResult(null);
-                reload();
-              })
-            }
-          >
-            אישור המנות והכמויות שנבחרו
-          </button>
-        </>
-      )}
-    </section>
-  );
-}
-import { JobResult } from "./ui.tsx";
+
 export function Shopping() {
   const { data, error, loading, reload } = useResource<any>("/shopping");
   const { run, busy } = useAction();

@@ -410,12 +410,24 @@ test("real PostgreSQL API, worker recovery, owner security and full media restor
         });
         assert.equal(response.status, 200);
         const uploaded = (await response.json()) as any;
-        const firstJob = (
-          await db.query(
-            "select * from kitchen.jobs where payload->>'item_id'=$1 and operation='extractRecipe'",
-            [uploaded.item.id],
-          )
-        ).rows[0];
+        assert.equal(uploaded.item.status, "waiting_chat");
+        assert.equal(
+          (
+            await db.query(
+              "select count(*)::int n from kitchen.jobs where operation='extractRecipe' and payload->>'item_id'=$1",
+              [uploaded.item.id],
+            )
+          ).rows[0].n,
+          0,
+        );
+        // Isolated test double for the legacy preservation invariant, never a runtime provider.
+        const firstJob = await enqueue(
+          db,
+          "ai",
+          "extractRecipe",
+          "test-only-extract-" + randomUUID(),
+          { item_id: uploaded.item.id, revision: 1 },
+        );
         const { handleJob } = await import("../server/worker.ts");
         let candidate = recipe();
         const fake = () => ({
@@ -459,18 +471,19 @@ test("real PostgreSQL API, worker recovery, owner security and full media restor
           ).status,
           200,
         );
-        const next = await request(
-          "/imports/" + item.id + "/rescan",
-          "POST",
-          {},
+        assert.equal(
+          (await request("/imports/" + item.id + "/rescan", "POST", {})).status,
+          404,
         );
         candidate.ingredients[0].amount.low = "9";
         candidate.ingredients[0].amount.text = "9";
-        const nextJob = (
-          await db.query("select * from kitchen.jobs where id=$1", [
-            next.data.id,
-          ])
-        ).rows[0];
+        const nextJob = await enqueue(
+          db,
+          "ai",
+          "extractRecipe",
+          "test-only-rescan-" + randomUUID(),
+          { item_id: item.id, revision: 1 },
+        );
         await handleJob(nextJob, fake);
         await db.query(
           "update kitchen.jobs set status='succeeded' where id=$1",
@@ -583,7 +596,7 @@ test("real PostgreSQL API, worker recovery, owner security and full media restor
       },
     );
     await t.test(
-      "recipe image requests are explicit and deduplicated; cropping retains AI illustration lineage",
+      "provider image endpoint is removed; non-generative cropping retains illustration lineage",
       async () => {
         assert.equal(
           (
@@ -593,28 +606,15 @@ test("real PostgreSQL API, worker recovery, owner security and full media restor
           ).rows[0].n,
           0,
         );
-        const call = async () => {
-          const response = await fetch(
-            origin + "/api/recipes/" + rid + "/image",
-            {
-              method: "POST",
-              headers: {
-                cookie,
-                "Content-Type": "application/json",
-                "Idempotency-Key": randomUUID(),
-              },
-              body: JSON.stringify({
-                operation: "generateImage",
-                prompt: "בדיקה בלבד — אין מפתח או מכסה",
-              }),
-            },
-          );
-          assert.equal(response.status, 200);
-          return response.json() as any;
-        };
-        const first = await call(),
-          second = await call();
-        assert.equal(first.id, second.id);
+        assert.equal(
+          (
+            await request("/recipes/" + rid + "/image", "POST", {
+              operation: "generateImage",
+              prompt: "removed",
+            })
+          ).status,
+          404,
+        );
         const bytes = await sharp({
           create: {
             width: 600,
@@ -726,6 +726,10 @@ test("real PostgreSQL API, worker recovery, owner security and full media restor
     await t.test(
       "50 durable jobs recover after worker lease expiry without duplicate effects; dispatched AI becomes uncertain",
       async () => {
+        const { handleJob } = await import("../server/worker.ts");
+        while (await runOne(handleJob)) {
+          /* Finish real media/library work before the synthetic worker's queue. */
+        }
         for (let i = 0; i < 50; i++)
           await enqueue(db, "test", "effect", "test-" + i, { index: i });
         await db.query(
@@ -801,7 +805,7 @@ test("real PostgreSQL API, worker recovery, owner security and full media restor
         assert.equal(
           (await request("/jobs/" + uncertain.id + "/retry", "POST", {}))
             .status,
-          409,
+          410,
         );
       },
     );

@@ -1,3 +1,4 @@
+import { CategoryBrowser } from "./categories.tsx";
 import { useState, useEffect } from "react";
 import {
   Plus,
@@ -9,7 +10,6 @@ import {
   Clock,
   ShoppingBasket,
   Expand,
-  ImagePlus,
 } from "lucide-react";
 import { api, go, mediaUrl, upload } from "./api.ts";
 import {
@@ -20,7 +20,6 @@ import {
   MediaImage,
   Dialog,
   Confirm,
-  JobResult,
 } from "./ui.tsx";
 import { sourceLabel } from "../../shared/provenance.ts";
 import { RecipeEditor } from "./editor.tsx";
@@ -47,11 +46,13 @@ export function RecipeHome() {
       max_active: "",
       max_total: "",
     }),
-    [editing, setEditing] = useState(false),
-    [natural, setNatural] = useState<string | null>(null),
-    [naturalJob, setNaturalJob] = useState<string | null>(null);
+    [editing, setEditing] = useState(
+      new URLSearchParams(window.location.hash.split("?")[1] ?? "").has("new"),
+    );
+
   const [selection, setSelection] = useState<any[]>([]),
-    [remove, setRemove] = useState<any[] | null>(null);
+    [remove, setRemove] = useState<any[] | null>(null),
+    [managing, setManaging] = useState(false);
   const params = new URLSearchParams({
     q: query,
     status,
@@ -69,7 +70,6 @@ export function RecipeHome() {
         }
       : {}),
     ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)),
-    ...(natural ? { natural_job: natural } : {}),
   });
   const { data, error, loading, reload } = useResource<any>(
     "/recipes?" + params.toString(),
@@ -81,17 +81,15 @@ export function RecipeHome() {
   const categories = useResource<any>("/categories"),
     cooking = useResource<any>("/cooking");
   const { run, busy, notify } = useAction();
+  useEffect(() => {
+    const add = () => setEditing(true);
+    window.addEventListener("kitchen-add-recipe", add);
+    return () => window.removeEventListener("kitchen-add-recipe", add);
+  }, []);
   const change = () => setOffset(0);
   return (
-    <>
-      <PageTitle title="המטבח שלי" subtitle="הטעמים שאוהבים. המתכונים ששומרים.">
-        <button className="button primary" onClick={() => setEditing(true)}>
-          <Plus size={19} /> מתכון חדש
-        </button>
-        <button className="button outline" onClick={() => go("/imports")}>
-          <Camera size={18} /> צילום וייבוא
-        </button>
-      </PageTitle>
+    <div className="k-library-page">
+      <h1 className="k-sr-only">המתכונים שלי</h1>
       {cooking.data?.items
         .filter((c: any) => c.state === "active")
         .slice(0, 3)
@@ -114,7 +112,6 @@ export function RecipeHome() {
         onSubmit={(e) => {
           e.preventDefault();
           setQuery(q);
-          setNatural(null);
           change();
         }}
       >
@@ -129,112 +126,66 @@ export function RecipeHome() {
           חיפוש
         </button>
       </form>
-      <div className="k-actions">
-        <button
-          className="k-text"
-          disabled={busy || !q.trim()}
-          onClick={() =>
-            run(async () => {
-              const j = await api(
-                "/ai/search",
-                "POST",
-                { query: q },
-                crypto.randomUUID(),
-              );
-              setNaturalJob(j.id);
-              setNatural(null);
-              setQuery("");
-              change();
-              notify("החיפוש הטבעי נשלח לעיבוד. התוצאות ייטענו לאחר השלמתו.");
-            })
-          }
-        >
-          חיפוש בשפה טבעית בעזרת AI
-        </button>
-        {naturalJob && (
-          <button
-            className="k-text"
-            onClick={() => {
-              setNatural(naturalJob);
-              reload();
-            }}
-          >
-            טעינת תוצאות החיפוש הטבעי
-          </button>
-        )}
-      </div>
-      {naturalJob && (
-        <JobResult jobId={naturalJob} onDone={(j) => setNatural(j.id)} />
-      )}
-
-      <div className="k-category-grid">
-        {categories.data?.items
-          .filter((c: any) => c.parent_id === null)
-          .map((c: any) => (
-            <button
-              className={category === c.id ? "selected" : ""}
-              key={c.id}
-              onClick={() => {
-                setCategory(category === c.id ? "" : c.id);
+      <CategoryBrowser
+        items={categories.data?.items ?? []}
+        selected={category}
+        change={(id) => {
+          setCategory(id);
+          change();
+        }}
+      />
+      <details className="k-filters">
+        <summary>סינון ומיון</summary>
+        <div className="k-filter-row">
+          <label>
+            אוסף
+            <select
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
                 change();
               }}
             >
-              <MediaImage id={c.media_id} />
-              <span>{c.name}</span>
-            </button>
-          ))}
-      </div>
-      <div className="k-filter-row">
-        <label>
-          אוסף
-          <select
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value);
+              <option value="published">המתכונים שלי</option>
+              <option value="draft">טיוטות</option>
+              <option value="trash">סל מחזור</option>
+            </select>
+          </label>
+          <label>
+            מיון
+            <select
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value);
+                change();
+              }}
+            >
+              {[
+                ["updated", "עודכנו לאחרונה"],
+                ["created", "נוספו לאחרונה"],
+                ["cooked", "הוכנו לאחרונה"],
+                ["popular", "פופולריים אצלי"],
+                ["rating", "דירוג"],
+                ["name", "שם"],
+              ].map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className={favorite ? "button primary" : "button outline"}
+            aria-pressed={favorite}
+            onClick={() => {
+              setFavorite(!favorite);
               change();
             }}
           >
-            <option value="published">המתכונים שלי</option>
-            <option value="draft">טיוטות</option>
-            <option value="trash">סל מחזור</option>
-          </select>
-        </label>
-        <label>
-          מיון
-          <select
-            value={sort}
-            onChange={(e) => {
-              setSort(e.target.value);
-              change();
-            }}
-          >
-            {[
-              ["updated", "עודכנו לאחרונה"],
-              ["created", "נוספו לאחרונה"],
-              ["cooked", "הוכנו לאחרונה"],
-              ["popular", "פופולריים אצלי"],
-              ["rating", "דירוג"],
-              ["name", "שם"],
-            ].map(([v, l]) => (
-              <option key={v} value={v}>
-                {l}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          className={favorite ? "button primary" : "button outline"}
-          aria-pressed={favorite}
-          onClick={() => {
-            setFavorite(!favorite);
-            change();
-          }}
-        >
-          <Heart size={16} /> מועדפים
-        </button>
-      </div>
-      <details className="k-filters">
-        <summary>מסננים נוספים</summary>
+            <Heart size={16} /> מועדפים
+          </button>
+        </div>
+
         <div className="k-grid-2">
           <label>
             קטגוריה ותת־קטגוריה
@@ -334,8 +285,6 @@ export function RecipeHome() {
             setCategory("");
             setQ("");
             setQuery("");
-            setNatural(null);
-            setNaturalJob(null);
             change();
           }}
         >
@@ -345,56 +294,69 @@ export function RecipeHome() {
       <LoadState loading={loading} error={error} retry={reload} />
       {data && (
         <>
-          <p className="k-note">{data.total} מתכונים באוסף</p>
-          <div className="k-actions">
+          <div className="k-collection-heading">
+            <p>{data.total} מתכונים באוסף</p>
             <button
-              className="button outline"
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const all = await api(
-                    "/recipes?" + params + "&selection=true",
-                  );
-                  setSelection(all.items);
-                })
-              }
+              className="k-text"
+              aria-pressed={managing}
+              onClick={() => setManaging(!managing)}
             >
-              בחירת הכול — כל העמודים
-            </button>
-            <button
-              className="button outline"
-              disabled={busy || !selection.length}
-              onClick={() => setSelection([])}
-            >
-              ניקוי בחירה
-            </button>
-            <span role="status">נבחרו {selection.length} מתכונים</span>
-            <button
-              className="button outline danger"
-              disabled={busy || !selection.length}
-              onClick={() => setRemove(selection)}
-            >
-              {status === "trash" ? "שחזור הנבחרים" : "מחיקת הנבחרים"}
+              {managing ? "סיום בחירה" : "בחירה ופעולות"}
             </button>
           </div>
+          {managing && (
+            <div className="k-actions k-selection-toolbar">
+              <button
+                className="button outline"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    const all = await api(
+                      "/recipes?" + params + "&selection=true",
+                    );
+                    setSelection(all.items);
+                  })
+                }
+              >
+                בחירת הכול — כל העמודים
+              </button>
+              <button
+                className="button outline"
+                disabled={busy || !selection.length}
+                onClick={() => setSelection([])}
+              >
+                ניקוי בחירה
+              </button>
+              <span role="status">נבחרו {selection.length} מתכונים</span>
+              <button
+                className="button outline danger"
+                disabled={busy || !selection.length}
+                onClick={() => setRemove(selection)}
+              >
+                {status === "trash" ? "שחזור הנבחרים" : "מחיקת הנבחרים"}
+              </button>
+            </div>
+          )}
           <div className="k-recipes-grid">
             {data.items.map((r: any) => (
               <article className="k-card" key={r.id}>
-                <label className="k-card-select">
-                  <input
-                    type="checkbox"
-                    aria-label={"בחירת " + (r.title || "מתכון ללא שם")}
-                    checked={selection.some((s) => s.id === r.id)}
-                    onChange={(e) =>
-                      setSelection((old) =>
-                        e.target.checked
-                          ? [...old, { id: r.id, revision: r.revision }]
-                          : old.filter((s) => s.id !== r.id),
-                      )
-                    }
-                  />{" "}
-                  בחירה
-                </label>
+                {managing && (
+                  <label className="k-card-select">
+                    <input
+                      type="checkbox"
+                      aria-label={"בחירת " + (r.title || "מתכון ללא שם")}
+                      checked={selection.some((s) => s.id === r.id)}
+                      onChange={(e) =>
+                        setSelection((old) =>
+                          e.target.checked
+                            ? [...old, { id: r.id, revision: r.revision }]
+                            : old.filter((s) => s.id !== r.id),
+                        )
+                      }
+                    />{" "}
+                    בחירה
+                  </label>
+                )}
                 <button
                   className="k-card-photo"
                   onClick={() => go("/recipes/" + r.id)}
@@ -426,23 +388,34 @@ export function RecipeHome() {
                     <h2>{r.title || "מתכון ללא שם"}</h2>
                   </button>
                   <p>{r.description}</p>
-                  <button
-                    className="k-text danger"
-                    onClick={() =>
-                      setRemove([{ id: r.id, revision: r.revision }])
-                    }
-                  >
-                    {status === "trash" ? "שחזור" : "מחיקה"}
-                  </button>
+                  {managing && (
+                    <button
+                      className="k-text danger"
+                      onClick={() =>
+                        setRemove([{ id: r.id, revision: r.revision }])
+                      }
+                    >
+                      {status === "trash" ? "שחזור" : "מחיקה"}
+                    </button>
+                  )}
                   <div className="k-meta">
-                    <span>
-                      <Clock size={14} /> עבודה: {r.active_minutes ?? "לא צוין"}
-                    </span>
-                    <span>כולל: {r.total_minutes ?? "לא צוין"}</span>
+                    {r.active_minutes !== null || r.total_minutes !== null ? (
+                      <>
+                        <span>
+                          <Clock size={14} /> עבודה:{" "}
+                          {r.active_minutes ?? "לא צוין"}
+                        </span>
+                        <span>כולל: {r.total_minutes ?? "לא צוין"}</span>
+                      </>
+                    ) : (
+                      <span>זמן לא צוין</span>
+                    )}
                   </div>
                   <div className="k-meta">
-                    <span>{r.classification}</span>
-                    <span>הוכן {r.cook_count} פעמים</span>
+                    {r.classification !== "לא ידוע" && (
+                      <span>{r.classification}</span>
+                    )}
+                    {r.cook_count > 0 && <span>הוכן {r.cook_count} פעמים</span>}
                     {r.status !== "published" && (
                       <span>{r.status === "draft" ? "טיוטה" : "נמחק"}</span>
                     )}
@@ -518,7 +491,7 @@ export function RecipeHome() {
           }}
         />
       )}
-    </>
+    </div>
   );
 }
 export function RecipeDetail({ id }: { id: string }) {
@@ -530,11 +503,6 @@ export function RecipeDetail({ id }: { id: string }) {
   const [target, setTarget] = useState(""),
     [editing, setEditing] = useState(false),
     [zoom, setZoom] = useState<any>(null),
-    [imageMode, setImageMode] = useState(false),
-    [imagePrompt, setImagePrompt] = useState(""),
-    [imageJob, setImageJob] = useState<string | null>(null),
-    [imagePreview, setImagePreview] = useState<string | null>(null),
-    [assistant, setAssistant] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false),
     [pan, setPan] = useState(false);
   const { run, busy, notify } = useAction();
@@ -700,23 +668,7 @@ export function RecipeDetail({ id }: { id: string }) {
       {c.equipment.length > 0 && <p>ציוד: {c.equipment.join(", ")}</p>}
       <section className="k-panel">
         <h2>המקור והגלריה</h2>
-        {data.media.some((m: any) => m.origin === "source") && (
-          <button
-            className="button outline"
-            disabled={busy}
-            onClick={() =>
-              run(async () => {
-                await api("/recipes/" + id + "/rescan", "POST", {});
-                notify(
-                  "המקורות נשלחו לסריקה נוספת. התיקונים נשמרו; התוצאה תחכה להשוואה בתור הייבוא.",
-                );
-                go("/imports");
-              })
-            }
-          >
-            סריקה נוספת להשוואה
-          </button>
-        )}
+
         <p className="k-note">
           צילומי המקור נשמרים תמיד. לחיצה פותחת זום; סרטונים נטענים רק כשפותחים
           אותם.
@@ -814,9 +766,6 @@ export function RecipeDetail({ id }: { id: string }) {
             ? `תמונה עד ${settings.data.limits.image_mb}MB, סרטון עד ${settings.data.limits.video_mb}MB ו־${settings.data.limits.video_minutes} דקות, הקלטה עד ${settings.data.limits.audio_mb}MB.`
             : "מגבלות המדיה נטענות מהשרת."}
         </p>
-        <button className="button outline" onClick={() => setImageMode(true)}>
-          <ImagePlus size={17} /> שיפור או יצירת תמונה
-        </button>
       </section>
       {c.notes && (
         <section className="k-panel">
@@ -902,9 +851,6 @@ export function RecipeDetail({ id }: { id: string }) {
         )}
       </section>
       <div className="k-actions">
-        <button className="button outline" onClick={() => setAssistant(true)}>
-          נתקעתי — עוזר בישול
-        </button>
         <button
           className="button outline"
           disabled={busy || !!scaleError}
@@ -1013,163 +959,9 @@ export function RecipeDetail({ id }: { id: string }) {
           changed={reload}
         />
       )}
-      {assistant && (
-        <Assistant
-          recipeId={id}
-          target={target || c.yield?.amount}
-          close={() => setAssistant(false)}
-        />
-      )}
+
       {pan && <PanTool close={() => setPan(false)} />}
-      {imageMode && (
-        <Dialog title="שיפור או יצירת תמונה" close={() => setImageMode(false)}>
-          <p className="k-note">
-            המקור יישאר בגלריה. תמונה גנרטיבית תסומן כתמונת המחשה.
-          </p>
-          <label>
-            הנחיה לתמונה
-            <textarea
-              value={imagePrompt}
-              onChange={(e) => setImagePrompt(e.target.value)}
-            />
-          </label>
-          <div className="k-actions">
-            <button
-              className="button primary"
-              disabled={busy}
-              onClick={() =>
-                run(async () => {
-                  const job = await api(
-                    `/recipes/${id}/image`,
-                    "POST",
-                    { operation: "generateImage", prompt: imagePrompt },
-                    crypto.randomUUID(),
-                  );
-                  setImageJob(job.id);
-                })
-              }
-            >
-              יצירת תמונת המחשה
-            </button>
-            {data.media
-              .filter((m: any) => m.kind === "image")
-              .map((m: any) => (
-                <button
-                  className="button outline"
-                  key={m.id}
-                  disabled={busy}
-                  onClick={() =>
-                    run(async () => {
-                      const job = await api(
-                        `/recipes/${id}/image`,
-                        "POST",
-                        {
-                          operation: "editImage",
-                          media_id: m.id,
-                          prompt: imagePrompt,
-                        },
-                        crypto.randomUUID(),
-                      );
-                      setImageJob(job.id);
-                    })
-                  }
-                >
-                  שיפור {m.origin === "source" ? "צילום המקור" : "תמונה קיימת"}
-                </button>
-              ))}
-          </div>
-          {imageJob && <JobResult jobId={imageJob} onImage={setImagePreview} />}
-          {imagePreview && (
-            <div className="k-panel">
-              <MediaImage id={imagePreview} variant="original" />
-              <div className="k-actions">
-                {[false, true].map((primary) => (
-                  <button
-                    className="button primary"
-                    key={String(primary)}
-                    disabled={busy}
-                    onClick={() =>
-                      run(async () => {
-                        await api(`/recipes/${id}/media`, "POST", {
-                          media_id: imagePreview,
-                          primary,
-                          position: data.media.length,
-                        });
-                        notify("תמונת ההמחשה נשמרה");
-                        setImagePreview(null);
-                        reload();
-                      })
-                    }
-                  >
-                    {primary ? "שמירה כתמונה ראשית" : "שמירה בגלריה"}
-                  </button>
-                ))}
-                <button
-                  className="button quiet"
-                  onClick={() => setImagePreview(null)}
-                >
-                  ביטול — לא לצרף למתכון
-                </button>
-              </div>
-            </div>
-          )}
-        </Dialog>
-      )}
     </>
-  );
-}
-export function Assistant({
-  recipeId,
-  cookingId,
-  target,
-  close,
-}: {
-  recipeId: string;
-  cookingId?: string;
-  target?: string;
-  close: () => void;
-}) {
-  const [q, setQ] = useState(""),
-    [job, setJob] = useState<string | null>(null);
-  const { run, busy } = useAction();
-  return (
-    <Dialog title="נתקעתי — חושבים יחד" close={close}>
-      <p className="k-note">
-        התשובה מתייחסת למתכון, לגרסה ולכמות הנוכחיים. עצות לא משנות את המתכון
-        אוטומטית.
-      </p>
-      <label>
-        מה קרה במטבח?
-        <textarea
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="הבצק דביק, חסר לי מצרך…"
-        />
-      </label>
-      <button
-        className="button primary"
-        disabled={busy || !q.trim()}
-        onClick={() =>
-          run(async () => {
-            const j = await api(
-              "/assistant",
-              "POST",
-              {
-                recipe_id: recipeId,
-                cooking_id: cookingId,
-                question: q,
-                target,
-              },
-              crypto.randomUUID(),
-            );
-            setJob(j.id);
-          })
-        }
-      >
-        בקשת עצה
-      </button>
-      {job && <JobResult jobId={job} />}
-    </Dialog>
   );
 }
 function MediaViewer({

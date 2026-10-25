@@ -13,7 +13,7 @@ import { parseNumber } from "../shared/quantities.ts";
 import { normalize } from "../shared/planning.ts";
 export async function getRecipe(tx: Db, id: string) {
   const r = await tx.query(
-    "select r.*,coalesce((select jsonb_agg(category_id) from kitchen.recipe_categories where recipe_id=r.id),'[]') as category_ids from kitchen.recipes r where id=$1",
+    "select r.*,coalesce((select m.id from kitchen.media m where m.id=r.primary_media_id and m.state='ready'),(select m.id from kitchen.recipe_media rm join kitchen.media m on m.id=rm.media_id where rm.recipe_id=r.id and m.kind='image' and m.state='ready' order by rm.position,m.created_at limit 1)) as primary_media_id,coalesce((select jsonb_agg(category_id) from kitchen.recipe_categories where recipe_id=r.id),'[]') as category_ids from kitchen.recipes r where id=$1",
     [id],
   );
   const row = requireValue(r.rows[0], "המתכון לא נמצא");

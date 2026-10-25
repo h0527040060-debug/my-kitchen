@@ -11,15 +11,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { api, go } from "./api.ts";
-import {
-  useAction,
-  useResource,
-  LoadState,
-  PageTitle,
-  Dialog,
-  JobResult,
-} from "./ui.tsx";
-import { Assistant } from "./recipes.tsx";
+import { useAction, useResource, LoadState, PageTitle, Dialog } from "./ui.tsx";
 import {
   scaleRecipe,
   amountText,
@@ -37,9 +29,7 @@ export function Cooking({ id }: { id: string }) {
     [finish, setFinish] = useState(false),
     [rating, setRating] = useState(""),
     [notes, setNotes] = useState(""),
-    [assistant, setAssistant] = useState(false),
     [listening, setListening] = useState(false),
-    [voiceJob, setVoiceJob] = useState<string | null>(null),
     [wake, setWake] = useState(false),
     [tick, setTick] = useState(Date.now());
   const recognition = useRef<any>(null);
@@ -136,24 +126,13 @@ export function Cooking({ id }: { id: string }) {
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(utterance);
     } else
-      run(async () => {
-        const job = await api(
-          "/voice/speak",
-          "POST",
-          { text: step.text },
-          crypto.randomUUID(),
-        );
-        setVoiceJob(job.id);
-        notify(
-          "לא נמצא קול עברי מקומי. ההקראה נשלחה לשירות הקול בשרת. הקול ייווצר באמצעות AI.",
-        );
-      });
+      notify("אין קול עברי זמין בדפדפן הזה. אפשר לקרוא את השלבים על המסך.");
   }
-  async function listen(forceServer = false) {
+  async function listen() {
     const SpeechRecognition =
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition && !forceServer) {
+    if (SpeechRecognition) {
       const r = new SpeechRecognition();
       recognition.current = r;
       r.lang = "he-IL";
@@ -176,40 +155,7 @@ export function Cooking({ id }: { id: string }) {
       }
       return;
     }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      recorderRef.current = recorder;
-      streamRef.current = stream;
-      const chunks: BlobPart[] = [];
-      setListening(true);
-      recorder.ondataavailable = (e) => chunks.push(e.data);
-      recorder.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        setListening(false);
-        run(async () => {
-          const file = new File(chunks, "command.webm", {
-            type: recorder.mimeType,
-          });
-          const media = await uploadAudio(file);
-          const job = await api(
-            "/voice/transcribe",
-            "POST",
-            { media_id: media.id },
-            crypto.randomUUID(),
-          );
-          setVoiceJob(job.id);
-          notify("הפקודה נשלחה לתמלול. אפשר לבדוק את הטקסט לפני ביצוע.");
-        });
-      };
-      recorder.start();
-      window.setTimeout(() => {
-        if (recorder.state === "recording") recorder.stop();
-      }, 5000);
-    } catch {
-      setListening(false);
-      notify("לא התקבלה גישה למיקרופון. כל הפעולות זמינות במגע.");
-    }
+    notify("הדפדפן אינו תומך בזיהוי דיבור בעברית. כל הפעולות זמינות במגע.");
   }
   return (
     <>
@@ -217,11 +163,7 @@ export function Cooking({ id }: { id: string }) {
         title={c.snapshot.title || "מתכון ללא שם"}
         subtitle={`בישול ${active ? "פעיל" : c.state === "completed" ? "שהושלם" : "שבוטל"} · גרסה ${c.recipe_revision} · ${c.target ? c.target + " " + c.snapshot.yield?.unit : "כמויות המקור"}`}
         back={() => go("/recipes/" + c.recipe_id)}
-      >
-        <button className="button outline" onClick={() => setAssistant(true)}>
-          נתקעתי
-        </button>
-      </PageTitle>
+      ></PageTitle>
       <div className="k-note">
         הבישול מחזיק עותק קבוע. עריכת המתכון אינה משנה את הכמויות או הסימונים
         כאן.
@@ -434,26 +376,11 @@ export function Cooking({ id }: { id: string }) {
             <Mic size={18} />{" "}
             {listening ? "מקשיב… עצירה" : "פקודה קולית בעברית"}
           </button>
-          <button
-            className="button outline"
-            disabled={busy || listening || !active}
-            onClick={() => void listen(true)}
-          >
-            הקלטת פקודה ותמלול דרך השרת
-          </button>
+
           <button className="button outline" disabled={!step} onClick={speak}>
             <Volume2 size={18} /> הקראת השלב הנוכחי
           </button>
         </div>
-        {voiceJob && (
-          <>
-            <JobResult jobId={voiceJob} />
-            <VoiceResult
-              jobId={voiceJob}
-              command={(text) => run(() => command(text))}
-            />
-          </>
-        )}
       </section>
       <section className="k-panel">
         <h2>הטיימרים שלי</h2>
@@ -615,46 +542,6 @@ export function Cooking({ id }: { id: string }) {
           </button>
         </Dialog>
       )}
-      {assistant && (
-        <Assistant
-          recipeId={c.recipe_id}
-          cookingId={id}
-          close={() => setAssistant(false)}
-        />
-      )}
     </>
   );
-}
-async function uploadAudio(file: File) {
-  const form = new FormData();
-  form.append("file", file);
-  const r = await fetch("/api/media", {
-    method: "POST",
-    credentials: "same-origin",
-    body: form,
-  });
-  const data = await r.json();
-  if (!r.ok) throw Error(data.error);
-  return data;
-}
-function VoiceResult({
-  jobId,
-  command,
-}: {
-  jobId: string;
-  command: (text: string) => void;
-}) {
-  const { data } = useResource<any>("/jobs/" + jobId, 2500);
-  const result = data?.status === "succeeded" ? data.result : null;
-  return result?.text ? (
-    <button className="button outline" onClick={() => command(result.text)}>
-      ביצוע הפקודה שזוהתה: {result.text}
-    </button>
-  ) : result?.audio_media_id ? (
-    <audio
-      controls
-      autoPlay
-      src={"/api/media/" + result.audio_media_id + "/content?variant=original"}
-    />
-  ) : null;
 }

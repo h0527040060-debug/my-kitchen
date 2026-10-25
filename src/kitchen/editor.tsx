@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { suggestCategoryPaths } from "../../shared/category-suggestions.ts";
+import { categoryPath } from "../../shared/category-themes.ts";
+import { useState, useEffect } from "react";
 import {
   measurementDefaults,
   type MeasurementConfig,
@@ -927,6 +929,22 @@ export function RecipeEditor({
   const [measurements, setMeasurements] = useState<MeasurementConfig>(
     recipe?.measurement_config ?? measurementDefaults,
   );
+  const tree = useResource<any>("/categories"),
+    [categoryTouched, setCategoryTouched] = useState(false);
+  const proposals = suggestCategoryPaths(content);
+  useEffect(() => {
+    if (recipe || categoryTouched || !tree.data) return;
+    const ids = proposals
+      .map(
+        (path) =>
+          tree.data.items.find(
+            (c: any) =>
+              categoryPath(tree.data.items, c.id).join("/") === path.join("/"),
+          )?.id,
+      )
+      .filter(Boolean);
+    setCategories(ids);
+  }, [content, tree.data, categoryTouched]);
   const issues = readiness(content);
   async function save(status: "draft" | "published") {
     const result = await api(
@@ -1015,7 +1033,19 @@ export function RecipeEditor({
           רק על שם המצרך שהוגדר.
         </p>
       </fieldset>
-      <CategoryPicker selected={categories} onChange={setCategories} />
+      {!recipe && !categoryTouched && proposals.length > 0 && (
+        <p className="k-note">
+          סיווג מוצע: {proposals.map((p) => p.join(" ← ")).join(" · ")}. אפשר
+          לשנות את הבחירה; שמירת המתכון מאשרת את הקטגוריות המסומנות.
+        </p>
+      )}
+      <CategoryPicker
+        selected={categories}
+        onChange={(ids) => {
+          setCategoryTouched(true);
+          setCategories(ids);
+        }}
+      />
       {(issues.length > 0 || !categories.length) && (
         <details className="k-note">
           <summary>פרטים שאפשר להשלים בהמשך — אינם מעכבים שמירה</summary>

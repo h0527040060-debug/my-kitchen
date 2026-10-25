@@ -17,8 +17,9 @@ import { ChatImportPanel } from "./chat-import.tsx";
 const statuses: Record<string, string> = {
   queued: "ממתין לעיבוד",
   processing: "מעבד",
-  waiting_ai: "ממתין לחיבור AI",
-  needs_review: "דורש תיקון",
+  waiting_ai: "ממתין לקריאה בשיחה",
+  waiting_chat: "ממתין לקריאה בשיחה",
+  needs_review: "נקלט — אפשר לשמור",
   waiting_classification: "ממתין לסיווג",
   ready: "מוכן לאישור",
   saved: "נשמר",
@@ -134,8 +135,7 @@ export function Imports() {
         {settings.data && !settings.data.ai.configured && (
           <p className="k-note">
             במסלול הצ׳אט שלך שולחים תמונות בשיחה או לתיקיית Drive שלמעלה. העלאה
-            ישירה כאן שומרת מקור, אך קריאה אוטומטית שלו בשרת ממתינה לחיבור AI
-            נפרד.
+            ישירה כאן שומרת מקור, אך לקריאה וחילוץ שולחים אותו בשיחה.
           </p>
         )}
         <div className="k-actions">
@@ -367,7 +367,7 @@ export function Imports() {
               </span>
               {item.error && <p className="k-alert">{item.error}</p>}
               {item.suggestions?.reason && (
-                <p className="k-note">הצעת AI: {item.suggestions.reason}</p>
+                <p className="k-note">הצעת סיווג: {item.suggestions.reason}</p>
               )}
               {item.suggestions?.possible_duplicates?.length > 0 && (
                 <div className="k-note">
@@ -455,19 +455,7 @@ export function Imports() {
                     >
                       בדיקת נתונים, מקור ותיקון
                     </button>
-                    <button
-                      className="k-text"
-                      disabled={busy}
-                      onClick={() =>
-                        run(async () => {
-                          await api(`/imports/${item.id}/rescan`, "POST", {});
-                          reload();
-                          page.reload();
-                        })
-                      }
-                    >
-                      סריקה נוספת להשוואה
-                    </button>
+
                     <button
                       className="k-text"
                       disabled={busy}
@@ -515,7 +503,8 @@ export function Imports() {
         <Dialog title="אישור סיווג האצווה" close={() => setPreview(null)}>
           <p className="k-note">
             {preview.new_images} תמונות קטגוריה חדשות יתווספו לתור בעקבות
-            האישור. אם AI אינו זמין, הקטגוריות והמתכונים יישמרו והתמונות ימתינו.
+            האישור. התמונות נבחרות מספריית תמונות הנושא המובנית, ללא מפתח
+            חיצוני.
           </p>
           <p>
             שמירת {preview.items.length} מתכונים. פרטים חסרים אינם מעכבים שמירה
@@ -829,57 +818,7 @@ function ImportReview({ item, close }: { item: any; close: () => void }) {
         </section>
       )}
       <ContentEditor value={draft} onChange={change} />
-      <details className="k-panel">
-        <summary>קריאה ממוקדת של אזור לא ברור</summary>
-        <p>
-          ניסיון AI נוסף לפי בקשתך, במסגרת מגבלת הקריאות. החיתוך אינו מוחק את
-          המקור.
-        </p>
-        <label>
-          תמונה
-          <select
-            value={cropMedia}
-            onChange={(e) => setCropMedia(e.target.value)}
-          >
-            {order.map((id, i) => (
-              <option key={id} value={id}>
-                מקור {i + 1}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="k-grid-2">
-          {Object.entries(crop).map(([k, v]) => (
-            <label key={k}>
-              {k}
-              <input
-                type="number"
-                min="0"
-                value={v}
-                onChange={(e) =>
-                  setCrop({ ...crop, [k]: Number(e.target.value) })
-                }
-              />
-            </label>
-          ))}
-        </div>
-        <button
-          className="button outline"
-          disabled={busy || saving || !!saveError}
-          onClick={() =>
-            run(async () => {
-              await api(`/imports/${item.id}/rescan`, "POST", {
-                media_order: order,
-                crop: { media_id: cropMedia, rect: crop },
-              });
-              notify("הסריקה נשלחה. התוצאה תוצג להשוואה ולא תדרוס את הטיוטה");
-              close();
-            })
-          }
-        >
-          סריקה ממוקדת והשוואה
-        </button>
-      </details>
+
       <div className="k-save-bar">
         <button
           className="button primary"

@@ -1,3 +1,5 @@
+import { categoryPath, categoryTheme } from "../shared/category-themes.ts";
+import { installCategoryStarter } from "./category-starter.ts";
 import express from "express";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
@@ -34,10 +36,7 @@ import {
 import { registerMedia } from "./media.ts";
 import { normalizedImage } from "./image-input.ts";
 import { store } from "./storage.ts";
-import { requestedImage } from "./ai-requests.ts";
-import { modelConfig } from "./ai.ts";
 import { fieldSources } from "../shared/provenance.ts";
-import { prices } from "./pricing.ts";
 import { measurementPreferences, insertShoppingLine } from "./shopping.ts";
 import { mediaLimits, hostingInfo } from "./limits.ts";
 import {
@@ -182,20 +181,28 @@ export function createApp() {
       return {
         preferences: owner.preferences,
         ai: {
-          configured: !!process.env.OPENAI_API_KEY,
-          models: modelConfig,
-          daily_max_calls: Number(process.env.AI_DAILY_MAX_CALLS || 0),
+          configured: false,
+          models: {},
+          daily_max_calls: 0,
           usage: usage.rows,
-          estimated_cost: prices()
-            ? usage.rows.reduce((n, r) => n + Number(r.estimated_usd ?? 0), 0)
-            : null,
-          cost_note: prices()
-            ? "עלות משוערת לפי טבלת המחירים שהוגדרה; אינה חיוב הספק בפועל"
-            : "אין תעריפים מאומתים מוגדרים; ספירת קריאות אינה חיוב בפועל",
+          estimated_cost: null,
+          cost_note:
+            "פעולות ספק AI הוסרו מהיישום; הייבוא מתבצע בשיחה ותמונות הקטגוריות מובנות",
         },
         limits: mediaLimits(),
         hosting: hostingInfo(),
       };
+    }),
+  );
+  app.put(
+    "/api/appearance",
+    wrap(async (req) => {
+      const design = z.enum(["sage", "night", "paper"]).parse(req.body.design);
+      await db.query(
+        "update kitchen.owner set preferences=jsonb_set(preferences,'{interface_design}',to_jsonb($1::text)) where id=1",
+        [design],
+      );
+      return { design };
     }),
   );
   app.put(
@@ -208,9 +215,10 @@ export function createApp() {
           package_weights: z.record(z.string(), z.number().positive()),
         })
         .parse(req.body);
-      await db.query("update kitchen.owner set preferences=$1 where id=1", [
-        JSON.stringify(preferences),
-      ]);
+      await db.query(
+        "update kitchen.owner set preferences=preferences||$1::jsonb where id=1",
+        [JSON.stringify(preferences)],
+      );
       return { preferences };
     }),
   );
@@ -226,10 +234,26 @@ export function createApp() {
   );
   app.get(
     "/api/categories",
-    wrap(async () => ({
-      items: (await db.query("select * from kitchen.categories order by name"))
-        .rows,
-    })),
+    wrap(async () => {
+      const items = (
+        await db.query(
+          "with recursive tree as(select id ancestor,id descendant from kitchen.categories union all select t.ancestor,c.id from tree t join kitchen.categories c on c.parent_id=t.descendant), counts as(select t.ancestor,count(distinct r.id)::int n from tree t join kitchen.recipe_categories rc on rc.category_id=t.descendant join kitchen.recipes r on r.id=rc.recipe_id and r.status='published' group by t.ancestor) select c.*,coalesce(counts.n,0) recipe_count from kitchen.categories c left join counts on counts.ancestor=c.id order by c.name",
+        )
+      ).rows;
+      return {
+        items: items.map((c) => ({
+          ...c,
+          theme: categoryTheme(categoryPath(items, c.id)),
+        })),
+      };
+    }),
+  );
+  app.post(
+    "/api/categories/starter",
+    wrap(async (req) => {
+      z.literal(true).parse(req.body.confirmed);
+      return transaction(installCategoryStarter);
+    }),
   );
   app.post(
     "/api/categories/preview",
@@ -327,30 +351,6 @@ export function createApp() {
         await tx.query("delete from kitchen.categories where id=$1", [from]);
         return { ok: true };
       });
-    }),
-  );
-  app.post(
-    "/api/categories/:id/edit-image",
-    wrap(async (req) => {
-      const c = requireValue(
-        (
-          await db.query("select * from kitchen.categories where id=$1", [
-            uuid.parse(req.params.id),
-          ])
-        ).rows[0],
-      );
-      if (!c.media_id)
-        throw new HttpError(422, "יש לבחור תמונת נושא לפני שיפור");
-      const prompt = z.string().max(2000).parse(req.body.prompt);
-      return transaction((tx) =>
-        requestedImage(
-          tx,
-          "editImage",
-          c.id,
-          { category_id: c.id, recipe_id: c.id, media_id: c.media_id, prompt },
-          `category-edit:${token(req)}`,
-        ),
-      );
     }),
   );
   app.get(
@@ -546,7 +546,7 @@ export function createApp() {
       ).rows[0].n;
       params.push(limit, offset);
       const rows = await db.query(
-        `select r.id,r.title,r.revision,r.status,r.favorite,r.primary_media_id,(select origin from kitchen.media where id=r.primary_media_id) as primary_media_origin,r.active_minutes,r.total_minutes,r.cook_count,r.rating,r.classification,r.tags,r.created_at,r.updated_at,r.content->'yield' as yield,r.content->>'description' as description from kitchen.recipes r where ${where} order by ${sorts[String(req.query.sort)] ?? sorts.updated},r.id limit $${params.length - 1} offset $${params.length}`,
+        `select r.id,r.title,r.revision,r.status,r.favorite,pm.id as primary_media_id,pm.origin as primary_media_origin,r.active_minutes,r.total_minutes,r.cook_count,r.rating,r.classification,r.tags,r.created_at,r.updated_at,r.content->'yield' as yield,r.content->>'description' as description from kitchen.recipes r left join lateral(select m.id,m.origin from kitchen.recipe_media rm join kitchen.media m on m.id=rm.media_id where rm.recipe_id=r.id and m.kind='image' and m.state='ready' order by (m.id=r.primary_media_id) desc,rm.position,m.created_at limit 1) pm on true where ${where} order by ${sorts[String(req.query.sort)] ?? sorts.updated},r.id limit $${params.length - 1} offset $${params.length}`,
         params,
       );
       return { items: rows.rows, total, offset, limit };
@@ -594,36 +594,6 @@ export function createApp() {
           id: uuid.parse(req.params.id),
         }),
       ),
-    ),
-  );
-  app.post(
-    "/api/recipes/:id/rescan",
-    wrap(async (req) =>
-      transaction(async (tx) => {
-        const r = await getRecipe(tx, uuid.parse(req.params.id));
-        const sources = (
-          await tx.query(
-            "select m.id,rm.position from kitchen.recipe_media rm join kitchen.media m on m.id=rm.media_id where rm.recipe_id=$1 and m.origin='source' order by rm.position",
-            [r.id],
-          )
-        ).rows;
-        if (!sources.length) throw new HttpError(422, "למתכון אין תמונות מקור");
-        const id = randomUUID();
-        await tx.query(
-          "insert into kitchen.import_items(id,draft,recipe_id,base_recipe_revision) values($1,$2,$3,$4)",
-          [id, JSON.stringify(r.content), r.id, r.revision],
-        );
-        for (const m of sources)
-          await tx.query(
-            "insert into kitchen.import_media(item_id,media_id,position) values($1,$2,$3)",
-            [id, m.id, m.position],
-          );
-        await enqueue(tx, "ai", "extractRecipe", `extract:${id}:1`, {
-          item_id: id,
-          revision: 1,
-        });
-        return { id };
-      }),
     ),
   );
   app.post(
@@ -723,36 +693,6 @@ export function createApp() {
         return { count: body.selection.length };
       }),
     );
-  app.post(
-    "/api/recipes/:id/image",
-    wrap(async (req) => {
-      const id = uuid.parse(req.params.id),
-        recipe = await getRecipe(db, id);
-      const b = z
-        .object({
-          operation: z.enum(["generateImage", "editImage"]),
-          prompt: z.string().max(2000),
-          media_id: uuid.optional(),
-        })
-        .parse(req.body);
-      if (b.operation === "editImage" && !b.media_id)
-        throw new HttpError(400, "יש לבחור תמונה לעריכה");
-      return transaction((tx) =>
-        requestedImage(
-          tx,
-          b.operation,
-          id,
-          {
-            ...b,
-            recipe_id: id,
-            content: recipe.content,
-            recipe_revision: recipe.revision,
-          },
-          `recipe-ai:${token(req)}`,
-        ),
-      );
-    }),
-  );
   app.get(
     "/api/recipes/:id/versions/:revision",
     wrap(async (req) =>
@@ -973,17 +913,13 @@ export function createApp() {
             "insert into kitchen.import_media(item_id,media_id,position) values($1,$2,0)",
             [id, media.id],
           );
-          const job = await enqueue(
-            tx,
-            "ai",
-            "extractRecipe",
-            `extract:${id}:1`,
-            { item_id: id, revision: 1 },
+          await tx.query(
+            "update kitchen.import_items set status='waiting_chat' where id=$1",
+            [id],
           );
           return {
-            item: { id, status: "queued" },
+            item: { id, status: "waiting_chat" },
             media_id: media.id,
-            job,
             duplicate: false,
           };
         });
@@ -1014,31 +950,6 @@ export function createApp() {
           [item.id, id],
         );
         return { id };
-      }),
-    ),
-  );
-  app.post(
-    "/api/voice/transcribe",
-    wrap(async (req) => {
-      const media_id = uuid.parse(req.body.media_id);
-      requireValue(
-        (
-          await db.query(
-            "select id from kitchen.media where id=$1 and kind='audio'",
-            [media_id],
-          )
-        ).rows[0],
-      );
-      return enqueue(db, "ai", "transcribeAudio", `transcribe:${token(req)}`, {
-        media_id,
-      });
-    }),
-  );
-  app.post(
-    "/api/voice/speak",
-    wrap(async (req) =>
-      enqueue(db, "ai", "speakStep", `speech:${token(req)}`, {
-        text: z.string().min(1).max(4096).parse(req.body.text),
       }),
     ),
   );
@@ -1238,10 +1149,10 @@ export function createApp() {
           "update kitchen.jobs set status='cancelled' where operation='extractRecipe' and payload->>'item_id'=any($1::text[]) and status in('queued','blocked')",
           [b.item_ids],
         );
-        await enqueue(tx, "ai", "extractRecipe", `extract:${id}:1`, {
-          item_id: id,
-          revision: 1,
-        });
+        await tx.query(
+          "update kitchen.import_items set status='waiting_chat' where id=$1",
+          [id],
+        );
         return { id };
       });
     }),
@@ -1292,100 +1203,6 @@ export function createApp() {
             [item.id],
           )
         ).rows[0];
-      });
-    }),
-  );
-  app.post(
-    "/api/imports/:id/rescan",
-    wrap(async (req) => {
-      const b = z
-        .object({
-          crop: z
-            .object({
-              media_id: uuid,
-              rect: z.object({
-                left: z.number().int().nonnegative(),
-                top: z.number().int().nonnegative(),
-                width: z.number().int().positive(),
-                height: z.number().int().positive(),
-              }),
-            })
-            .optional(),
-          media_order: z.array(uuid).min(1).max(20).optional(),
-        })
-        .parse(req.body);
-      return transaction(async (tx) => {
-        const item = requireValue(
-          (
-            await tx.query(
-              "select * from kitchen.import_items where id=$1 and status not in('saved','merged','trash') for update",
-              [uuid.parse(req.params.id)],
-            )
-          ).rows[0],
-        );
-        if (item.status === "processing")
-          throw new HttpError(
-            409,
-            "סריקה כבר בעבודה. יש להמתין לתוצאה לפני שליחה נוספת",
-          );
-        const uncertain = await tx.query(
-          "select id from kitchen.jobs where operation='extractRecipe' and payload->>'item_id'=$1 and status='uncertain'",
-          [item.id],
-        );
-        if (uncertain.rows.length)
-          throw new HttpError(
-            409,
-            "תוצאת הסריקה הקודמת אינה ודאית. יש לאשר ניסיון נוסף במסך העבודות כדי להימנע מחיוב כפול בלתי מודע",
-          );
-        await tx.query(
-          "update kitchen.jobs set status='cancelled' where operation='extractRecipe' and payload->>'item_id'=$1 and status in('queued','blocked','failed')",
-          [item.id],
-        );
-        if (b.media_order) {
-          const existing = (
-            await tx.query(
-              "select media_id from kitchen.import_media where item_id=$1",
-              [item.id],
-            )
-          ).rows.map((r) => r.media_id);
-          if (
-            existing.length !== b.media_order.length ||
-            !existing.every((id) => b.media_order!.includes(id))
-          )
-            throw new HttpError(400, "יש לכלול את כל תמונות המקור");
-          for (const [position, m] of b.media_order.entries())
-            await tx.query(
-              "update kitchen.import_media set position=$3 where item_id=$1 and media_id=$2",
-              [item.id, m, position],
-            );
-        }
-        if (
-          b.crop &&
-          !(
-            await tx.query(
-              "select 1 from kitchen.import_media where item_id=$1 and media_id=$2",
-              [item.id, b.crop.media_id],
-            )
-          ).rows.length
-        )
-          throw new HttpError(400, "תמונת החיתוך אינה חלק מהפריט");
-        const revision = item.revision + 1;
-        await tx.query(
-          "update kitchen.import_items set revision=$2,scan_generation=scan_generation+1,status='queued' where id=$1",
-          [item.id, revision],
-        );
-        return enqueue(
-          tx,
-          "ai",
-          "extractRecipe",
-          `extract:${item.id}:${revision}`,
-          {
-            item_id: item.id,
-            revision,
-            generation: item.scan_generation + 1,
-            crop: b.crop,
-          },
-        );
       });
     }),
   );
@@ -1502,6 +1319,8 @@ export function createApp() {
             )
           ).rows[0],
         );
+        if (job.type === "ai" && job.operation !== "categoryImage")
+          throw new HttpError(410, "פעולות ספק AI הוסרו מהאפליקציה");
         if (!["failed", "blocked", "uncertain"].includes(job.status))
           throw new HttpError(409, "עבודה זו אינה ממתינה לניסיון חוזר");
         if (
@@ -1522,70 +1341,6 @@ export function createApp() {
             [job.payload.item_id],
           );
         return { ok: true };
-      });
-    }),
-  );
-  app.post(
-    "/api/ai/search",
-    wrap(async (req) =>
-      enqueue(db, "ai", "interpretSearch", `search:${token(req)}`, {
-        query: z.string().min(1).max(500).parse(req.body.query),
-      }),
-    ),
-  );
-  app.post(
-    "/api/ai/check",
-    wrap(async (req) =>
-      enqueue(db, "ai", "checkModels", `check:${token(req)}`, {}),
-    ),
-  );
-  app.post(
-    "/api/assistant",
-    wrap(async (req) => {
-      const b = z
-        .object({
-          recipe_id: uuid,
-          cooking_id: uuid.optional(),
-          question: z.string().min(1).max(3000),
-          target: z.string().optional(),
-          step_id: z.string().optional(),
-        })
-        .parse(req.body);
-      const recipe = await getRecipe(db, b.recipe_id);
-      const cooking = b.cooking_id
-        ? requireValue(
-            (
-              await db.query(
-                "select * from kitchen.cooking where id=$1 and recipe_id=$2",
-                [b.cooking_id, b.recipe_id],
-              )
-            ).rows[0],
-          )
-        : null;
-      const context = cooking
-        ? {
-            content: cooking.snapshot,
-            target: cooking.target,
-            step_index: cooking.step_index,
-          }
-        : {
-            content: recipe.content,
-            target: b.target ?? recipe.content.yield?.amount,
-            step_id: b.step_id,
-          };
-      return transaction(async (tx) => {
-        const job = await enqueue(
-          tx,
-          "ai",
-          "assistCooking",
-          `assistant:${token(req)}`,
-          { context, question: b.question },
-        );
-        await tx.query(
-          "insert into kitchen.assistant_messages(id,job_id,recipe_id,cooking_id,question) values($1,$2,$3,$4,$5) on conflict do nothing",
-          [randomUUID(), job.id, b.recipe_id, b.cooking_id ?? null, b.question],
-        );
-        return job;
       });
     }),
   );
@@ -2135,103 +1890,6 @@ export function createApp() {
         return { id };
       }),
     ),
-  );
-  app.post(
-    "/api/meals/:id/suggest",
-    wrap(async (req) => {
-      const meal = requireValue(
-        (
-          await db.query("select * from kitchen.meals where id=$1", [
-            uuid.parse(req.params.id),
-          ])
-        ).rows[0],
-      );
-      const recipes = (
-        await db.query(
-          "select id,title,classification,tags,content->'yield' as yield from kitchen.recipes where status='published' order by created_at desc limit 200",
-        )
-      ).rows;
-      return enqueue(db, "ai", "mealSuggestion", `meal-ai:${token(req)}`, {
-        recipes,
-        guests: {
-          adults: meal.adults,
-          children: meal.children,
-          style: meal.style,
-        },
-        meal_id: meal.id,
-      });
-    }),
-  );
-  app.post(
-    "/api/meals/:id/accept-suggestion",
-    wrap(async (req) => {
-      const b = z
-        .object({
-          job_id: uuid,
-          revision: z.number().int(),
-          confirmed: z.literal(true),
-          items: z
-            .array(z.object({ recipe_id: uuid, target: z.string().min(1) }))
-            .min(1)
-            .max(30),
-        })
-        .parse(req.body);
-      return transaction(async (tx) => {
-        const mealId = uuid.parse(req.params.id);
-        if (
-          (
-            await tx.query(
-              "select 1 from kitchen.meal_suggestion_acceptances where job_id=$1",
-              [b.job_id],
-            )
-          ).rows.length
-        )
-          return { already_accepted: true };
-        const j = requireValue(
-          (
-            await tx.query(
-              "select result,payload from kitchen.jobs where id=$1 and operation='mealSuggestion' and status='succeeded'",
-              [b.job_id],
-            )
-          ).rows[0],
-        );
-        if (
-          j.payload.meal_id !== mealId ||
-          b.items.some(
-            (i) =>
-              !j.result.items.some((r: any) => r.recipe_id === i.recipe_id),
-          )
-        )
-          throw new HttpError(400, "הבחירה אינה חלק מהצעת הארוחה");
-        const m = await tx.query(
-          "update kitchen.meals set revision=revision+1 where id=$1 and revision=$2 returning id",
-          [mealId, b.revision],
-        );
-        if (!m.rows.length) throw new HttpError(409, "הארוחה השתנתה");
-        for (const item of b.items) {
-          const r = await getRecipe(tx, item.recipe_id);
-          if (r.status !== "published")
-            throw new HttpError(422, "מתכון בהצעה אינו מאושר עוד");
-          scaleRecipe(r.content, item.target);
-          await tx.query(
-            "insert into kitchen.meal_items(id,meal_id,recipe_id,recipe_revision,snapshot,target,position) values($1,$2,$3,$4,$5,$6,(select count(*) from kitchen.meal_items where meal_id=$2))",
-            [
-              randomUUID(),
-              mealId,
-              r.id,
-              r.revision,
-              JSON.stringify(r.content),
-              item.target,
-            ],
-          );
-        }
-        await tx.query(
-          "insert into kitchen.meal_suggestion_acceptances(job_id,meal_id) values($1,$2)",
-          [b.job_id, mealId],
-        );
-        return { ok: true };
-      });
-    }),
   );
   app.post(
     "/api/meals/:id/preparation",

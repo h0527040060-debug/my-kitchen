@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }) => {
     .getByRole("button", { name: "כניסה למטבח שלי", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "המטבח שלי", exact: true }),
+    page.getByRole("button", { name: "מתכון חדש", exact: true }),
   ).toBeVisible();
 });
 test("mobile bulk save accepts missing fields across pages, selects every matching recipe and restores trash", async ({
@@ -94,6 +94,9 @@ test("mobile bulk save accepts missing fields across pages, selects every matchi
     page.getByText("55 מתכונים באוסף", { exact: true }),
   ).toBeVisible();
   await page
+    .getByRole("button", { name: "בחירה ופעולות", exact: true })
+    .click();
+  await page
     .getByRole("button", { name: "בחירת הכול — כל העמודים", exact: true })
     .click();
   await expect(
@@ -109,6 +112,7 @@ test("mobile bulk save accepts missing fields across pages, selects every matchi
   await expect(
     page.getByText("0 מתכונים באוסף", { exact: true }),
   ).toBeVisible();
+  await page.getByText("סינון ומיון", { exact: true }).click();
   await page
     .getByRole("combobox", { name: "אוסף", exact: true })
     .selectOption("trash");

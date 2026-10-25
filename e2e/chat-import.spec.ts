@@ -15,11 +15,16 @@ test("mobile owner imports a structured chat package with private source and can
     .getByRole("button", { name: "כניסה למטבח שלי", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "המטבח שלי", exact: true }),
+    page.getByRole("button", { name: "מתכון חדש", exact: true }),
   ).toBeVisible();
   const before = await (await page.request.get("/api/recipes")).json();
   const image = await sharp({
-    create: { width: 90, height: 70, channels: 3, background: "#c18065" },
+    create: {
+      width: 90,
+      height: 70,
+      channels: 3,
+      background: "#" + randomUUID().replaceAll("-", "").slice(0, 6),
+    },
   })
     .png()
     .toBuffer();

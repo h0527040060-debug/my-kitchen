@@ -1,17 +1,17 @@
+import { handleCategoryImage } from "./category-images.ts";
 import { db, pool, transaction } from "./db.ts";
 import { runOne, BlockedJob, RetryableJob } from "./jobs.ts";
-import { OpenAIProvider } from "./ai.ts";
 import { imageForVision, processMedia, registerMedia } from "./media.ts";
 import { applyEggDefault, readiness } from "../shared/quantities.ts";
 import sharp from "sharp";
 import { normalizedImage } from "./image-input.ts";
 import { fieldSources } from "../shared/provenance.ts";
 import { store } from "./storage.ts";
-export async function handleJob(
-  job: any,
-  providerFactory: (job: any) => any = (job) => new OpenAIProvider(job),
-) {
+export async function handleJob(job: any, providerFactory?: (job: any) => any) {
   if (job.type === "media") return processMedia(job.payload.media_id);
+  if (job.operation === "categoryImage") return handleCategoryImage(job);
+  if (!providerFactory)
+    throw new BlockedJob("פעולות ספק AI הוסרו; הייבוא מתבצע דרך השיחה");
   const ai = providerFactory(job);
   const p = job.payload;
   if (job.operation === "checkModels") {
@@ -178,46 +178,6 @@ export async function handleJob(
       generated_voice: true,
     });
     return { audio_media_id: media.id, disclosure: "הקול נוצר באמצעות AI" };
-  }
-  if (job.operation === "categoryImage") {
-    const c = (
-      await db.query("select * from kitchen.categories where id=$1", [
-        p.category_id,
-      ])
-    ).rows[0];
-    if (
-      !c ||
-      c.manual_image ||
-      c.media_id ||
-      c.image_revision !== p.image_revision
-    )
-      return { skipped: true };
-    const ancestors = (
-      await db.query(
-        "with recursive path as(select * from kitchen.categories where id=$1 union all select c.* from kitchen.categories c join path p on p.parent_id=c.id) select name from path",
-        [c.id],
-      )
-    ).rows
-      .map((r) => r.name)
-      .reverse();
-    const bytes = await ai.generateImage(
-      `Natural appetizing food photograph representing category ${ancestors.join(" > ")}. Warm daylight, cream and sage styling, realistic dish, no text or lettering, simple square card composition. ${p.prompt || ""}`,
-    );
-    const media = await registerMedia(db, bytes, "image/webp", "ai", {
-      model: process.env.IMAGE_GENERATION_MODEL || "gpt-image-2.5-flare",
-      prompt_version: "category-1",
-      category_id: c.id,
-      illustration: true,
-    });
-    await db.query(
-      "insert into kitchen.category_images(id,category_id,media_id,source) values(gen_random_uuid(),$1,$2,$3)",
-      [c.id, media.id, "ai"],
-    );
-    await db.query(
-      "update kitchen.categories set media_id=$2,image_state='ready' where id=$1 and manual_image=false and media_id is null and image_revision=$3",
-      [c.id, media.id, p.image_revision],
-    );
-    return { media_id: media.id };
   }
   if (job.operation === "generateImage" || job.operation === "editImage") {
     let bytes: Buffer;

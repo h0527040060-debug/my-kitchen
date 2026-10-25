@@ -166,10 +166,12 @@ export function MediaImage({
   id,
   alt = "",
   variant = "thumbnail",
+  fallback,
 }: {
   id?: string | null;
   alt?: string;
   variant?: string;
+  fallback?: ReactNode;
 }) {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -189,6 +191,8 @@ export function MediaImage({
       loading="lazy"
       onError={() => setFailed(true)}
     />
+  ) : fallback ? (
+    <>{fallback}</>
   ) : (
     <div className="k-media-pending">
       <ImageIcon strokeWidth={1} />
