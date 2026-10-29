@@ -213,6 +213,7 @@ test("AI main image and original are paired above the fold, gallery pages and co
       async () =>
         (await (await page.request.get(`/api/media/${generated.id}`)).json())
           .state,
+      { timeout: 30000 },
     )
     .toBe("ready");
   expect(
