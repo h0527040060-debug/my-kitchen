@@ -3,7 +3,9 @@ import { normalizedImage } from "./image-input.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Db } from "./db.ts";
@@ -111,10 +113,10 @@ export async function processMedia(mediaId: string) {
   ]);
   const media = r.rows[0];
   if (!media) throw Error("קובץ לא נמצא");
-  const bytes = await store.get(media.object_key);
   const derivatives: Record<string, string> = {};
   const meta: Record<string, unknown> = { ...media.metadata };
   if (media.kind === "image") {
+    const bytes = await store.get(media.object_key);
     const normalized = await normalizedImage(bytes);
     for (const [name, size, quality] of [
       ["thumbnail", 400, 72],
@@ -139,7 +141,10 @@ export async function processMedia(mediaId: string) {
     const temp = await mkdtemp(join(tmpdir(), "kitchen-video-"));
     try {
       const input = join(temp, "input");
-      await writeFile(input, bytes);
+      await pipeline(
+        (await store.open(media.object_key)).stream,
+        createWriteStream(input, { mode: 0o600 }),
+      );
       const probe = await exec(
         "ffprobe",
         [
@@ -176,7 +181,7 @@ export async function processMedia(mediaId: string) {
           "-map",
           "0:a:0?",
           "-vf",
-          "scale=trunc(min(1280\\,iw)/2)*2:-2",
+          "scale=w=min(1280\\,iw):h=min(1280\\,ih):force_original_aspect_ratio=decrease:force_divisible_by=2",
           "-c:v",
           "libx264",
           "-threads",
@@ -201,12 +206,18 @@ export async function processMedia(mediaId: string) {
         "ffmpeg",
         [
           "-y",
+          "-threads",
+          "1",
+          "-filter_threads",
+          "1",
           "-i",
           input,
           "-frames:v",
           "1",
           "-vf",
-          "scale=600:-2",
+          "scale=w=min(600\\,iw):h=min(600\\,ih):force_original_aspect_ratio=decrease",
+          "-threads",
+          "1",
           join(temp, "poster.jpg"),
         ],
         { timeout: 30000, maxBuffer: 1024 * 1024 },
@@ -216,7 +227,7 @@ export async function processMedia(mediaId: string) {
         ["poster", "poster.jpg", "image/jpeg"],
       ]) {
         const key = `derived/${media.id}/${file}`;
-        await store.put(key, await readFile(join(temp, file)), mime);
+        await store.putFile(key, join(temp, file), mime);
         derivatives[name] = key;
       }
       meta.duration_seconds = duration;
@@ -228,7 +239,10 @@ export async function processMedia(mediaId: string) {
     const temp = await mkdtemp(join(tmpdir(), "kitchen-audio-"));
     try {
       const input = join(temp, "input");
-      await writeFile(input, bytes);
+      await pipeline(
+        (await store.open(media.object_key)).stream,
+        createWriteStream(input, { mode: 0o600 }),
+      );
       const output = join(temp, "audio.mp3");
       await exec(
         "ffmpeg",
@@ -236,6 +250,10 @@ export async function processMedia(mediaId: string) {
           "-y",
           "-protocol_whitelist",
           "file,pipe",
+          "-threads",
+          "1",
+          "-filter_threads",
+          "1",
           "-i",
           input,
           "-t",
@@ -247,6 +265,8 @@ export async function processMedia(mediaId: string) {
           "24000",
           "-c:a",
           "libmp3lame",
+          "-threads",
+          "1",
           "-b:a",
           "64k",
           output,
@@ -263,7 +283,7 @@ export async function processMedia(mediaId: string) {
       if (!Number.isFinite(duration) || duration > limits.audio_minutes * 60)
         throw Error(`הקלטה חייבת להיות באורך עד ${limits.audio_minutes} דקות`);
       const key = `derived/${media.id}/audio.mp3`;
-      await store.put(key, await readFile(output), "audio/mpeg");
+      await store.putFile(key, output, "audio/mpeg");
       derivatives.audio = key;
       meta.duration_seconds = duration;
       meta.processed = true;

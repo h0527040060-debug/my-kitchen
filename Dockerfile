@@ -8,6 +8,7 @@ COPY . .
 RUN npm run build
 RUN npm prune --omit=dev
 FROM node:24-bookworm-slim
+ENV MALLOC_ARENA_MAX=2 UV_THREADPOOL_SIZE=2
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libheif-examples ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build --chown=node:node /app /app

@@ -16,7 +16,7 @@ import { categoryPaths } from "../server/recipes.ts";
 import { LocalStore, store } from "../server/storage.ts";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { backupTo, restoreFrom } from "../server/backup.ts";
 import { registerMedia, processMedia } from "../server/media.ts";
 if (
@@ -566,7 +566,9 @@ test("real PostgreSQL API, worker recovery, owner security and full media restor
               "-f",
               "lavfi",
               "-i",
-              "color=c=green:s=320x240:d=1",
+              "color=c=green:s=720x1600:d=1",
+              "-threads",
+              "1",
               "-c:v",
               "libx264",
               "-pix_fmt",
@@ -586,10 +588,55 @@ test("real PostgreSQL API, worker recovery, owner security and full media restor
           assert.equal(saved.metadata.processed, true);
           assert.ok(saved.derivatives.video && saved.derivatives.poster);
           assert.ok((await store.get(saved.derivatives.video)).length > 0);
+          const output = join(root, "output.mp4");
+          await writeFile(output, await store.get(saved.derivatives.video));
+          const probe = await promisify(execFile)("ffprobe", [
+            "-v",
+            "error",
+            "-show_streams",
+            "-of",
+            "json",
+            output,
+          ]);
+          const video = JSON.parse(probe.stdout).streams.find(
+            (s: any) => s.codec_type === "video",
+          );
+          assert(video.width <= 1280 && video.height <= 1280);
+          assert.equal(video.width % 2, 0);
+          assert.equal(video.height % 2, 0);
+          const full = await fetch(
+            origin + "/api/media/" + media.id + "/content?variant=video",
+            { headers: { cookie } },
+          );
+          assert.equal(full.status, 200);
+          const originalOutput = Buffer.from(await full.arrayBuffer());
+          const partial = await fetch(
+            origin + "/api/media/" + media.id + "/content?variant=video",
+            { headers: { cookie, range: "bytes=4-19" } },
+          );
+          assert.equal(partial.status, 206);
+          assert.equal(
+            partial.headers.get("content-range"),
+            `bytes 4-19/${originalOutput.length}`,
+          );
+          assert.deepEqual(
+            Buffer.from(await partial.arrayBuffer()),
+            originalOutput.subarray(4, 20),
+          );
+          const invalid = await fetch(
+            origin + "/api/media/" + media.id + "/content?variant=video",
+            { headers: { cookie, range: "bytes=999999999-" } },
+          );
+          assert.equal(invalid.status, 416);
+          assert.equal(
+            invalid.headers.get("content-range"),
+            `bytes */${originalOutput.length}`,
+          );
           const poster = await sharp(
             await store.get(saved.derivatives.poster),
           ).metadata();
           assert.equal(poster.format, "jpeg");
+          assert(poster.width! <= 600 && poster.height! <= 600);
         } finally {
           await rm(root, { recursive: true, force: true });
         }

@@ -12,6 +12,10 @@ services:
         value: render-free
       - key: NODE_OPTIONS
         value: --max-old-space-size=128
+      - key: MALLOC_ARENA_MAX
+        value: "2"
+      - key: UV_THREADPOOL_SIZE
+        value: "2"
       - key: DATABASE_URL
         sync: false
       - key: DATABASE_SSL

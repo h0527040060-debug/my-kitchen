@@ -9,6 +9,7 @@ import { readFile, unlink, mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { db, transaction } from "./db.ts";
 import { authMiddleware, digest, login, sameOrigin } from "./auth.ts";
 import { HttpError, requireValue } from "./errors.ts";
@@ -35,7 +36,7 @@ import {
 } from "../shared/planning.ts";
 import { registerMedia } from "./media.ts";
 import { normalizedImage } from "./image-input.ts";
-import { store } from "./storage.ts";
+import { store, ObjectRangeError, type ObjectRange } from "./storage.ts";
 import { fieldSources } from "../shared/provenance.ts";
 import { measurementPreferences, insertShoppingLine } from "./shopping.ts";
 import { mediaLimits, hostingInfo } from "./limits.ts";
@@ -750,7 +751,6 @@ export function createApp() {
         variant === "original" ? m.object_key : m.derivatives[variant];
       if (!key)
         throw new HttpError(409, "המדיה עדיין מעובדת או שהגרסה אינה קיימת");
-      const bytes = await store.get(key);
       const mime =
         variant === "original"
           ? m.mime
@@ -767,29 +767,47 @@ export function createApp() {
         "X-Content-Type-Options": "nosniff",
         "Accept-Ranges": "bytes",
       });
-      const range = req.get("range");
-      if (range) {
-        const parsed = /^bytes=(\d+)-(\d*)$/.exec(range);
-        if (!parsed) {
-          res.status(416).set("Content-Range", `bytes */${bytes.length}`).end();
+      const header = req.get("range");
+      let range: ObjectRange | undefined;
+      if (header) {
+        const parsed = /^bytes=(\d+)-(\d*)$/.exec(header);
+        const start = Number(parsed?.[1]),
+          end = parsed?.[2] ? Number(parsed[2]) : undefined;
+        if (
+          !parsed ||
+          !Number.isSafeInteger(start) ||
+          (end !== undefined && (!Number.isSafeInteger(end) || end < start))
+        ) {
+          res
+            .status(416)
+            .set("Content-Range", `bytes */${await store.size(key)}`)
+            .end();
           return;
         }
-        const start = Number(parsed[1]),
-          end = parsed[2]
-            ? Math.min(Number(parsed[2]), bytes.length - 1)
-            : bytes.length - 1;
-        if (start > end || start >= bytes.length) {
-          res.status(416).set("Content-Range", `bytes */${bytes.length}`).end();
-          return;
-        }
+        range = { start, end };
+      }
+      let object;
+      try {
+        object = await store.open(key, range);
+      } catch (error) {
+        if (!(error instanceof ObjectRangeError)) throw error;
+        res.status(416).set("Content-Range", `bytes */${error.total}`).end();
+        return;
+      }
+      if (object.range)
         res
           .status(206)
-          .set({
-            "Content-Range": `bytes ${start}-${end}/${bytes.length}`,
-            "Content-Length": String(end - start + 1),
-          })
-          .end(bytes.subarray(start, end + 1));
-      } else res.set("Content-Length", String(bytes.length)).end(bytes);
+          .set(
+            "Content-Range",
+            `bytes ${object.range.start}-${object.range.end}/${object.range.total}`,
+          );
+      res.set("Content-Length", String(object.length));
+      // Backpressure keeps media requests bounded; disconnects close the S3/file stream.
+      try {
+        await pipeline(object.stream, res);
+      } catch (error) {
+        if (!res.destroyed) throw error;
+      }
     }),
   );
   app.patch(

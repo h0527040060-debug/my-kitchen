@@ -64,13 +64,17 @@ test("a crashed cloud worker stops its sibling so the platform can restart both 
   const directory = await mkdtemp(join(tmpdir(), "kitchen-supervisor-"));
   try {
     const marker = join(directory, "stopped"),
+      ready = join(directory, "ready"),
       survivor = join(directory, "survivor.ts"),
       crash = join(directory, "crash.ts");
     await writeFile(
       survivor,
-      `import {writeFileSync} from 'node:fs'; process.on('SIGTERM',()=>{writeFileSync(${JSON.stringify(marker)},'stopped');process.exit(0)});setInterval(()=>{},1000);`,
+      `import {writeFileSync} from 'node:fs'; process.on('SIGTERM',()=>{writeFileSync(${JSON.stringify(marker)},'stopped');process.exit(0)});writeFileSync(${JSON.stringify(ready)},'ready');setInterval(()=>{},1000);`,
     );
-    await writeFile(crash, "setTimeout(()=>process.exit(7),500);");
+    await writeFile(
+      crash,
+      `import {existsSync} from 'node:fs';setInterval(()=>{if(existsSync(${JSON.stringify(ready)}))process.exit(7)},20);setTimeout(()=>process.exit(9),5000);`,
+    );
     assert.equal(await supervise([survivor, crash], process.env, 2000), 7);
     assert.equal(await readFile(marker, "utf8"), "stopped");
   } finally {
