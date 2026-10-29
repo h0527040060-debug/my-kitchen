@@ -1416,16 +1416,6 @@
 .kitchen select {
   scroll-margin-block: 100px;
 }
-.k-ai-badge {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  padding: 4px 8px;
-  background: #fffdf1ed;
-  border-radius: 5px;
-  font-size: 10px;
-  color: #5d654e;
-}
 .k-card-photo {
   position: relative;
 }

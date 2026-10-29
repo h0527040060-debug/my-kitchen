@@ -363,9 +363,6 @@ export function RecipeHome() {
                   aria-label={"פתיחת " + r.title}
                 >
                   <MediaImage id={r.primary_media_id} />
-                  {r.primary_media_origin === "ai" && (
-                    <span className="k-ai-badge">תמונת המחשה AI</span>
-                  )}
                 </button>
                 <button
                   className="k-card-heart"
