@@ -12,10 +12,12 @@ export async function api<T = any>(
   method = "GET",
   body?: unknown,
   key?: string,
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch("/api" + path, {
     method,
     credentials: "same-origin",
+    signal,
     headers: {
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(key ? { "Idempotency-Key": key } : {}),

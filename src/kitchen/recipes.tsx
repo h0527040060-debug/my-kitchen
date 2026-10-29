@@ -1,5 +1,6 @@
 import { CategoryBrowser } from "./categories.tsx";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useRecipeFeed } from "./recipe-feed.ts";
 import {
   Plus,
   Search,
@@ -36,7 +37,6 @@ export function RecipeHome() {
     [favorite, setFavorite] = useState(false),
     [status, setStatus] = useState("published"),
     [sort, setSort] = useState("updated"),
-    [offset, setOffset] = useState(0),
     [filters, setFilters] = useState({
       classification: "",
       tried: "",
@@ -56,7 +56,6 @@ export function RecipeHome() {
     q: query,
     status,
     sort,
-    offset: String(offset),
     favorite: String(favorite),
     ...(category ? { category } : {}),
     ...(new URLSearchParams(window.location.hash.split("?")[1] ?? "").get(
@@ -70,12 +69,17 @@ export function RecipeHome() {
       : {}),
     ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)),
   });
-  const { data, error, loading, reload } = useResource<any>(
-    "/recipes?" + params.toString(),
-  );
-  const scope = new URLSearchParams(params);
-  scope.delete("offset");
-  const selectionScope = scope.toString();
+  const {
+    data,
+    error,
+    loading,
+    loadingMore,
+    hasMore,
+    loadMore,
+    reload,
+    updateItem,
+  } = useRecipeFeed(params.toString());
+  const selectionScope = params.toString();
   useEffect(() => setSelection([]), [selectionScope]);
   const categories = useResource<any>("/categories"),
     cooking = useResource<any>("/cooking");
@@ -85,7 +89,26 @@ export function RecipeHome() {
     window.addEventListener("kitchen-add-recipe", add);
     return () => window.removeEventListener("kitchen-add-recipe", add);
   }, []);
-  const change = () => setOffset(0);
+  const sentinel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (
+      !sentinel.current ||
+      loading ||
+      loadingMore ||
+      error ||
+      !hasMore ||
+      !("IntersectionObserver" in window)
+    )
+      return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMore();
+      },
+      { rootMargin: "400px 0px" },
+    );
+    observer.observe(sentinel.current);
+    return () => observer.disconnect();
+  }, [loading, loadingMore, error, hasMore, loadMore]);
   return (
     <div className="k-library-page">
       <h1 className="k-sr-only">המתכונים שלי</h1>
@@ -111,7 +134,6 @@ export function RecipeHome() {
         onSubmit={(e) => {
           e.preventDefault();
           setQuery(q);
-          change();
         }}
       >
         <Search />
@@ -130,7 +152,6 @@ export function RecipeHome() {
         selected={category}
         change={(id) => {
           setCategory(id);
-          change();
         }}
       />
       <details className="k-filters">
@@ -142,7 +163,6 @@ export function RecipeHome() {
               value={status}
               onChange={(e) => {
                 setStatus(e.target.value);
-                change();
               }}
             >
               <option value="published">המתכונים שלי</option>
@@ -156,7 +176,6 @@ export function RecipeHome() {
               value={sort}
               onChange={(e) => {
                 setSort(e.target.value);
-                change();
               }}
             >
               {[
@@ -178,7 +197,6 @@ export function RecipeHome() {
             aria-pressed={favorite}
             onClick={() => {
               setFavorite(!favorite);
-              change();
             }}
           >
             <Heart size={16} /> מועדפים
@@ -192,7 +210,6 @@ export function RecipeHome() {
               value={category}
               onChange={(e) => {
                 setCategory(e.target.value);
-                change();
               }}
             >
               <option value="">הכול</option>
@@ -218,7 +235,6 @@ export function RecipeHome() {
                 value={(filters as any)[key as string]}
                 onChange={(e) => {
                   setFilters({ ...filters, [key as string]: e.target.value });
-                  change();
                 }}
               >
                 {(options as string[]).map((o) => (
@@ -239,7 +255,6 @@ export function RecipeHome() {
               value={filters.tag}
               onChange={(e) => {
                 setFilters({ ...filters, tag: e.target.value });
-                change();
               }}
               placeholder="ללא מיקסר, מתאים להקפאה…"
             />
@@ -252,7 +267,6 @@ export function RecipeHome() {
               value={filters.max_active}
               onChange={(e) => {
                 setFilters({ ...filters, max_active: e.target.value });
-                change();
               }}
             />
           </label>
@@ -264,7 +278,6 @@ export function RecipeHome() {
               value={filters.max_total}
               onChange={(e) => {
                 setFilters({ ...filters, max_total: e.target.value });
-                change();
               }}
             />
           </label>
@@ -284,13 +297,12 @@ export function RecipeHome() {
             setCategory("");
             setQ("");
             setQuery("");
-            change();
           }}
         >
           ניקוי מסננים
         </button>
       </details>
-      <LoadState loading={loading} error={error} retry={reload} />
+      <LoadState loading={loading} error={data ? "" : error} retry={reload} />
       {data && (
         <>
           <div className="k-collection-heading">
@@ -317,7 +329,7 @@ export function RecipeHome() {
                   })
                 }
               >
-                בחירת הכול — כל העמודים
+                בחירת כל המתכונים
               </button>
               <button
                 className="button outline"
@@ -376,7 +388,8 @@ export function RecipeHome() {
                       await api(`/recipes/${r.id}/favorite`, "PATCH", {
                         favorite: !r.favorite,
                       });
-                      reload();
+                      if (favorite) reload();
+                      else updateItem(r.id, { favorite: !r.favorite });
                     })
                   }
                 >
@@ -413,25 +426,23 @@ export function RecipeHome() {
               </button>
             </div>
           )}
-          <div className="k-pagination">
-            <button
-              className="button outline"
-              disabled={offset === 0}
-              onClick={() => setOffset(Math.max(0, offset - 24))}
-            >
-              הקודמים
-            </button>
-            <span>
-              {data.total ? offset + 1 : 0}–{Math.min(offset + 24, data.total)}{" "}
-              מתוך {data.total}
-            </span>
-            <button
-              className="button outline"
-              disabled={offset + 24 >= data.total}
-              onClick={() => setOffset(offset + 24)}
-            >
-              הבאים
-            </button>
+          <div ref={sentinel} className="k-feed-footer" aria-live="polite">
+            {loadingMore ? (
+              <span role="status">טוענים עוד מתכונים…</span>
+            ) : error ? (
+              <div className="k-alert" role="alert">
+                {error}
+                <button className="button outline" onClick={loadMore}>
+                  ניסיון נוסף
+                </button>
+              </div>
+            ) : hasMore ? (
+              <button className="k-text" onClick={loadMore}>
+                טעינת מתכונים נוספים
+              </button>
+            ) : data.items.length > 0 ? (
+              <span>כל המתכונים נטענו</span>
+            ) : null}
           </div>
         </>
       )}

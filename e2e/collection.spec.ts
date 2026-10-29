@@ -97,7 +97,7 @@ test("mobile bulk save accepts missing fields across pages, selects every matchi
     .getByRole("button", { name: "בחירה ופעולות", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "בחירת הכול — כל העמודים", exact: true })
+    .getByRole("button", { name: "בחירת כל המתכונים", exact: true })
     .click();
   await expect(
     page.getByText("נבחרו 55 מתכונים", { exact: true }),
@@ -120,7 +120,7 @@ test("mobile bulk save accepts missing fields across pages, selects every matchi
     page.getByText("55 מתכונים באוסף", { exact: true }),
   ).toBeVisible();
   await page
-    .getByRole("button", { name: "בחירת הכול — כל העמודים", exact: true })
+    .getByRole("button", { name: "בחירת כל המתכונים", exact: true })
     .click();
   await page
     .getByRole("button", { name: "שחזור הנבחרים", exact: true })
