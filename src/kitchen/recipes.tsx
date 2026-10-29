@@ -7,7 +7,6 @@ import {
   Camera,
   ArrowLeft,
   ChefHat,
-  Clock,
   ShoppingBasket,
   Expand,
 } from "lucide-react";
@@ -363,6 +362,9 @@ export function RecipeHome() {
                   aria-label={"פתיחת " + r.title}
                 >
                   <MediaImage id={r.primary_media_id} />
+                  <span className="k-card-caption">
+                    <span>{r.title || "מתכון ללא שם"}</span>
+                  </span>
                 </button>
                 <button
                   className="k-card-heart"
@@ -380,44 +382,21 @@ export function RecipeHome() {
                 >
                   <Heart fill={r.favorite ? "currentColor" : "none"} />
                 </button>
-                <div className="k-card-content">
-                  <button onClick={() => go("/recipes/" + r.id)}>
-                    <h2>{r.title || "מתכון ללא שם"}</h2>
+                {!managing && r.status !== "published" && (
+                  <span className="k-card-state">
+                    {r.status === "draft" ? "טיוטה" : "נמחק"}
+                  </span>
+                )}
+                {managing && (
+                  <button
+                    className="k-card-action k-text danger"
+                    onClick={() =>
+                      setRemove([{ id: r.id, revision: r.revision }])
+                    }
+                  >
+                    {status === "trash" ? "שחזור" : "מחיקה"}
                   </button>
-                  <p>{r.description}</p>
-                  {managing && (
-                    <button
-                      className="k-text danger"
-                      onClick={() =>
-                        setRemove([{ id: r.id, revision: r.revision }])
-                      }
-                    >
-                      {status === "trash" ? "שחזור" : "מחיקה"}
-                    </button>
-                  )}
-                  <div className="k-meta">
-                    {r.active_minutes !== null || r.total_minutes !== null ? (
-                      <>
-                        <span>
-                          <Clock size={14} /> עבודה:{" "}
-                          {r.active_minutes ?? "לא צוין"}
-                        </span>
-                        <span>כולל: {r.total_minutes ?? "לא צוין"}</span>
-                      </>
-                    ) : (
-                      <span>זמן לא צוין</span>
-                    )}
-                  </div>
-                  <div className="k-meta">
-                    {r.classification !== "לא ידוע" && (
-                      <span>{r.classification}</span>
-                    )}
-                    {r.cook_count > 0 && <span>הוכן {r.cook_count} פעמים</span>}
-                    {r.status !== "published" && (
-                      <span>{r.status === "draft" ? "טיוטה" : "נמחק"}</span>
-                    )}
-                  </div>
-                </div>
+                )}
               </article>
             ))}
           </div>
