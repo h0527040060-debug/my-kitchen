@@ -22,7 +22,7 @@
     "restore": "node --env-file-if-exists=.env --experimental-strip-types scripts/backup.ts restore",
     "test:e2e": "playwright test",
     "format": "prettier --write server shared src/kitchen scripts",
-    "test:integration": "node --experimental-strip-types --test tests/integration.test.ts && node --experimental-strip-types --test tests/chat-import.integration.test.ts && node --experimental-strip-types --test tests/collection.integration.test.ts && node --experimental-strip-types --test tests/category-library.integration.test.ts",
+    "test:integration": "node --experimental-strip-types --test tests/integration.test.ts && node --experimental-strip-types --test tests/chat-import.integration.test.ts && node --experimental-strip-types --test tests/collection.integration.test.ts && node --experimental-strip-types --test tests/category-library.integration.test.ts && node --experimental-strip-types --test tests/artwork.integration.test.ts",
     "chat:import": "node --experimental-strip-types scripts/chat-import.ts",
     "ai:smoke": "node --env-file-if-exists=.env --experimental-strip-types scripts/ai-smoke.ts",
     "ai:evaluate": "node --experimental-strip-types scripts/evaluate-extraction.ts",

@@ -11,6 +11,18 @@ test("phone layout has two compact recipe columns, pictured child categories and
     .getByRole("button", { name: "כניסה למטבח שלי", exact: true })
     .click();
   await expect(
+    page.getByRole("button", { name: "מתכון חדש", exact: true }),
+  ).toBeVisible();
+  expect(
+    (
+      await page.request.post("/api/categories/starter", {
+        data: { confirmed: true },
+      })
+    ).ok(),
+  ).toBe(true);
+  await page.reload();
+  await page.locator(".k-category-roots").getByRole("button", { name: "בישול", exact: true }).click();
+  await expect(
     page.getByRole("region", { name: "תתי קטגוריות בישול", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "אפייה", exact: true }).click();

@@ -246,6 +246,12 @@ export function createApp() {
           ...c,
           theme: categoryTheme(categoryPath(items, c.id)),
         })),
+        path_redirects:
+          (
+            await db.query(
+              "select preferences->'category_path_redirects' redirects from kitchen.owner where id=1",
+            )
+          ).rows[0]?.redirects ?? [],
       };
     }),
   );
@@ -254,6 +260,34 @@ export function createApp() {
     wrap(async (req) => {
       z.literal(true).parse(req.body.confirmed);
       return transaction(installCategoryStarter);
+    }),
+  );
+  app.put(
+    "/api/categories/path-redirects",
+    wrap(async (req) => {
+      const redirects = z
+        .array(
+          z.object({
+            from: z.array(z.string().trim().min(1).max(100)).min(1).max(8),
+            to_category_id: uuid,
+          }),
+        )
+        .max(1000)
+        .parse(req.body.redirects);
+      const ids = [...new Set(redirects.map((r) => r.to_category_id))];
+      const found = (
+        await db.query(
+          "select id from kitchen.categories where id=any($1::uuid[])",
+          [ids],
+        )
+      ).rows;
+      if (found.length !== ids.length)
+        throw new HttpError(409, "קטגוריית יעד השתנתה; יש לרענן");
+      await db.query(
+        "update kitchen.owner set preferences=jsonb_set(preferences,'{category_path_redirects}',$1::jsonb) where id=1",
+        [JSON.stringify(redirects)],
+      );
+      return { saved: redirects.length };
     }),
   );
   app.post(
@@ -736,6 +770,90 @@ export function createApp() {
       }
     }),
   );
+  app.post(
+    "/api/media/illustrations",
+    upload.single("file"),
+    wrap(async (req) => {
+      if (!req.file) throw new HttpError(400, "נדרשת תמונת המחשה");
+      try {
+        if (!req.file.mimetype.startsWith("image/"))
+          throw new HttpError(400, "נדרשת תמונה");
+        let provenanceInput: unknown;
+        try {
+          provenanceInput = JSON.parse(String(req.body.provenance));
+        } catch {
+          throw new HttpError(400, "פרטי מקור התמונה אינם תקינים");
+        }
+        const provenance = z
+          .object({
+            generator: z.literal("chatgpt_image_tool"),
+            model: z.string().max(100),
+            prompt_version: z.string().min(1).max(100),
+            atlas_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+            tile_index: z.number().int().min(0).max(63),
+            recipe_id: uuid.optional(),
+            category_id: uuid.optional(),
+            recipe_revision: z.number().int().positive().optional(),
+            source_media_ids: z.array(uuid).max(50),
+            prompt: z.string().max(20000),
+          })
+          .strict()
+          .refine(
+            (p) => Boolean(p.recipe_id) !== Boolean(p.category_id),
+            "יש לבחור יעד אחד לתמונה",
+          )
+          .parse(provenanceInput);
+        const bytes = await readFile(req.file.path);
+        return await transaction(async (tx) => {
+          if (provenance.recipe_id) {
+            const current = await getRecipe(tx, provenance.recipe_id);
+            if (current.revision !== provenance.recipe_revision)
+              throw new HttpError(
+                409,
+                "המתכון השתנה מאז יצירת התמונה; נדרשת בדיקת התאמה מחדש",
+              );
+            const sources = (
+              await tx.query(
+                "select media_id from kitchen.recipe_media where recipe_id=$1",
+                [provenance.recipe_id],
+              )
+            ).rows.map((r) => r.media_id);
+            if (provenance.source_media_ids.some((id) => !sources.includes(id)))
+              throw new HttpError(400, "תמונת מקור אינה שייכת למתכון");
+          } else
+            requireValue(
+              (
+                await tx.query(
+                  "select id from kitchen.categories where id=$1",
+                  [provenance.category_id],
+                )
+              ).rows[0],
+            );
+          return registerMedia(tx, bytes, req.file!.mimetype, "ai", {
+            ...provenance,
+            illustration: true,
+            created_with_chatgpt: true,
+            provider_api_call: false,
+          });
+        });
+      } finally {
+        await unlink(req.file.path).catch(() => {});
+      }
+    }),
+  );
+  app.get(
+    "/api/media/:id",
+    wrap(async (req) =>
+      requireValue(
+        (
+          await db.query(
+            "select id,digest,kind,origin,state,caption,metadata,derivatives from kitchen.media where id=$1",
+            [uuid.parse(req.params.id)],
+          )
+        ).rows[0],
+      ),
+    ),
+  );
   app.get(
     "/api/media/:id/content",
     wrap(async (req, res) => {
@@ -875,6 +993,8 @@ export function createApp() {
           media_id: uuid,
           primary: z.boolean(),
           position: z.number().int().min(0).default(0),
+          expected_revision: z.number().int().positive().optional(),
+          expected_primary_media_id: uuid.nullable().optional(),
         })
         .parse(req.body);
       const m = requireValue(
@@ -887,6 +1007,24 @@ export function createApp() {
       if (b.primary && m.kind !== "image")
         throw new HttpError(400, "תמונה ראשית חייבת להיות תמונה");
       return transaction(async (tx) => {
+        const current = requireValue(
+          (
+            await tx.query(
+              "select revision,primary_media_id from kitchen.recipes where id=$1 for update",
+              [id],
+            )
+          ).rows[0],
+        );
+        if (
+          (b.expected_revision !== undefined &&
+            current.revision !== b.expected_revision) ||
+          (b.expected_primary_media_id !== undefined &&
+            current.primary_media_id !== b.expected_primary_media_id)
+        )
+          throw new HttpError(
+            409,
+            "המתכון או התמונה הראשית השתנו; יש לרענן לפני החלפת התמונה",
+          );
         await tx.query(
           "insert into kitchen.recipe_media(recipe_id,media_id,position) values($1,$2,$3) on conflict(recipe_id,media_id) do update set position=excluded.position",
           [id, b.media_id, b.position],

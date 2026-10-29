@@ -118,8 +118,10 @@ export function CategoryBrowser({
               }}
             >
               <CategoryPicture category={c} all={items} />
-              <span>{c.name}</span>
-              <small>{c.recipe_count ?? 0} מתכונים</small>
+              <span className="k-category-caption">
+                <strong>{c.name}</strong>
+                <small>{c.recipe_count ?? 0}</small>
+              </span>
             </button>
           ))}
         </div>

@@ -551,13 +551,7 @@ export function RecipeDetail({ id }: { id: string }) {
           <ChefHat size={17} /> מתחילים לבשל
         </button>
       </PageTitle>
-      {r.primary_media_id && (
-        <div className="k-recipe-hero">
-          <MediaImage id={r.primary_media_id} variant="display" />
-          {data.media.find((m: any) => m.id === r.primary_media_id)?.origin ===
-            "ai" && <span>תמונת המחשה באמצעות AI</span>}
-        </div>
-      )}
+      <RecipeMediaHeader recipe={r} media={data.media} open={setZoom} />
       <p className="k-lead">{c.description}</p>
       <div className="k-meta">
         <span>עבודה: {c.active_minutes ?? "לא צוין"} דקות</span>
@@ -589,62 +583,72 @@ export function RecipeDetail({ id }: { id: string }) {
           חזרה לבסיס
         </button>
       </div>
-      {!hasBaseYield(c) && (
-        <p className="k-note">
-          תפוקת בסיס לא צוינה. אפשר לקרוא ולבשל לפי המקור; התאמת כמויות תהיה
-          זמינה אחרי השלמת תפוקה בעריכה.
-        </p>
-      )}
-      {r.warnings?.length > 0 && (
-        <details className="k-note">
-          <summary>פרטים להשלמה בהמשך ({r.warnings.length})</summary>
-          <ul>
-            {r.warnings.map((w: string, n: number) => (
-              <li key={n}>{w}</li>
-            ))}
-          </ul>
-        </details>
-      )}
       {scaleError && <p className="k-alert">{scaleError}</p>}
-      {target && !scaleError && (
-        <p className="k-note">
-          הכמויות מחושבות מערכי הבסיס. המקור, הזמנים והטמפרטורות לא השתנו.
-        </p>
-      )}
-      <details className="k-note">
-        <summary>מאיפה הנתונים?</summary>
-        <p>
-          תפוקה: {sourceLabel(r.field_sources?.yield)} · זמן עבודה:{" "}
-          {sourceLabel(r.field_sources?.active_minutes)} · זמן כולל:{" "}
-          {sourceLabel(r.field_sources?.total_minutes)}. הצעות הסיווג ותמונות
-          ההמחשה מסומנות בנפרד.
-        </p>
+      <details className="k-recipe-context">
+        <summary>כמויות, חוסרים ומידע מהמקור</summary>
+        {!hasBaseYield(c) && (
+          <p className="k-note">
+            תפוקת בסיס לא צוינה. אפשר לקרוא ולבשל לפי המקור; התאמת כמויות תהיה
+            זמינה אחרי השלמת תפוקה בעריכה.
+          </p>
+        )}
+        {r.warnings?.length > 0 && (
+          <details className="k-note">
+            <summary>פרטים להשלמה בהמשך ({r.warnings.length})</summary>
+            <ul>
+              {r.warnings.map((w: string, n: number) => (
+                <li key={n}>{w}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {target && !scaleError && (
+          <p className="k-note">
+            הכמויות מחושבות מערכי הבסיס. המקור, הזמנים והטמפרטורות לא השתנו.
+          </p>
+        )}
+        <details className="k-note">
+          <summary>מאיפה הנתונים?</summary>
+          <p>
+            תפוקה: {sourceLabel(r.field_sources?.yield)} · זמן עבודה:{" "}
+            {sourceLabel(r.field_sources?.active_minutes)} · זמן כולל:{" "}
+            {sourceLabel(r.field_sources?.total_minutes)}. הצעות הסיווג ותמונות
+            ההמחשה מסומנות בנפרד.
+          </p>
+        </details>
       </details>
       <div className="k-recipe-body">
         <section>
           <h2>מה צריך?</h2>
-          {scaled.ingredients.map(selectedIngredient).map((i: any) => (
-            <div className="k-ingredient" key={i.id}>
-              {i.group && <small>{i.group}</small>}
-              <p>
-                <bdi>{amountText(i.amount)}</bdi> {i.unit}{" "}
-                <strong>{i.name}</strong> {i.note}
-              </p>
-              {i.egg_size && (
-                <small>
-                  ביצה {i.egg_size}
-                  {i.egg_size_origin === "default"
-                    ? " · ברירת מחדל — לא צוין במקור"
-                    : ""}
-                </small>
-              )}
-              {i.uncertainty && <p className="k-alert">{i.uncertainty}</p>}
-              <details>
-                <summary>הניסוח המקורי</summary>
-                <p>{i.original || "הזנה ידנית"}</p>
-              </details>
-            </div>
-          ))}
+          {scaled.ingredients
+            .map(selectedIngredient)
+            .map((i: any, ingredientIndex: number) => (
+              <div className="k-ingredient" key={i.id}>
+                {i.group &&
+                  (ingredientIndex < 1 ||
+                    scaled.ingredients[ingredientIndex - 1]?.group !==
+                      i.group) && (
+                    <small className="k-group-title">{i.group}</small>
+                  )}
+                <p>
+                  <bdi>{amountText(i.amount)}</bdi> {i.unit}{" "}
+                  <strong>{i.name}</strong> {i.note}
+                </p>
+                {i.egg_size && (
+                  <small>
+                    ביצה {i.egg_size}
+                    {i.egg_size_origin === "default"
+                      ? " · ברירת מחדל — לא צוין במקור"
+                      : ""}
+                  </small>
+                )}
+                {i.uncertainty && <p className="k-alert">{i.uncertainty}</p>}
+                <details>
+                  <summary>הניסוח המקורי</summary>
+                  <p>{i.original || "הזנה ידנית"}</p>
+                </details>
+              </div>
+            ))}
         </section>
         <section>
           <h2>איך מכינים?</h2>
@@ -666,8 +670,8 @@ export function RecipeDetail({ id }: { id: string }) {
         </section>
       </div>
       {c.equipment.length > 0 && <p>ציוד: {c.equipment.join(", ")}</p>}
-      <section className="k-panel">
-        <h2>המקור והגלריה</h2>
+      <details className="k-panel k-gallery-management">
+        <summary>ניהול הגלריה והוספת קבצים</summary>
 
         <p className="k-note">
           צילומי המקור נשמרים תמיד. לחיצה פותחת זום; סרטונים נטענים רק כשפותחים
@@ -766,7 +770,7 @@ export function RecipeDetail({ id }: { id: string }) {
             ? `תמונה עד ${settings.data.limits.image_mb}MB, סרטון עד ${settings.data.limits.video_mb}MB ו־${settings.data.limits.video_minutes} דקות, הקלטה עד ${settings.data.limits.audio_mb}MB.`
             : "מגבלות המדיה נטענות מהשרת."}
         </p>
-      </section>
+      </details>
       {c.notes && (
         <section className="k-panel">
           <h2>טיפים למטבח</h2>
@@ -953,7 +957,10 @@ export function RecipeDetail({ id }: { id: string }) {
       )}
       {zoom && (
         <MediaViewer
+          key={zoom.id}
           media={zoom}
+          gallery={data.media}
+          navigate={setZoom}
           recipeId={id}
           close={() => setZoom(null)}
           changed={reload}
@@ -964,17 +971,107 @@ export function RecipeDetail({ id }: { id: string }) {
     </>
   );
 }
+function RecipeMediaHeader({
+  recipe,
+  media,
+  open,
+}: {
+  recipe: any;
+  media: any[];
+  open: (media: any) => void;
+}) {
+  const primary =
+    media.find((m) => m.id === recipe.primary_media_id) ??
+    media.find((m) => m.kind === "image");
+  const source =
+    media.find((m) => m.origin === "source" && m.id !== primary?.id) ??
+    media.find((m) => m.origin === "source");
+  if (!primary && !source) return null;
+  const cards = [
+    {
+      media: primary,
+      label:
+        primary?.origin === "ai"
+          ? "תמונת המחשה באמצעות AI"
+          : primary?.origin === "source"
+            ? "צילום המקור"
+            : "תמונת המנה",
+    },
+    { media: source, label: "המקור" },
+  ].filter(
+    (c, i, all) =>
+      c.media && all.findIndex((x) => x.media?.id === c.media.id) === i,
+  );
+  return (
+    <section className="k-recipe-media-header" aria-label="תמונת המנה והמקור">
+      <div className="k-recipe-media-pair">
+        {cards.map((card, i) => (
+          <button
+            key={i}
+            className="k-recipe-media-card"
+            onClick={() => open(card.media)}
+            aria-label={`פתיחת ${card.label}`}
+          >
+            <MediaImage
+              id={card.media.id}
+              variant={card.media.kind === "video" ? "poster" : "display"}
+            />
+            <span>
+              {card.label}
+              <Expand size={16} />
+            </span>
+          </button>
+        ))}
+      </div>
+      <button
+        className="k-gallery-open k-text"
+        onClick={() => open(primary ?? source)}
+      >
+        פתיחת כל הגלריה · {media.length} קבצים <Expand size={14} />
+      </button>
+    </section>
+  );
+}
 function MediaViewer({
   media,
+  gallery,
+  navigate,
   recipeId,
   close,
   changed,
 }: {
   media: any;
+  gallery: any[];
+  navigate: (media: any) => void;
   recipeId: string;
   close: () => void;
   changed: () => void;
 }) {
+  const items = gallery.some((m) => m.id === media.id)
+    ? gallery
+    : [media, ...gallery];
+  const index = items.findIndex((m) => m.id === media.id);
+  const [touchX, setTouchX] = useState<number | null>(null);
+  const move = (delta: number) => {
+    if (items.length > 1)
+      navigate(items[(index + delta + items.length) % items.length]);
+  };
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (
+        (event.target as HTMLElement)?.closest(
+          "input,textarea,select,[contenteditable=true]",
+        )
+      )
+        return;
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight")
+        event.preventDefault();
+      if (event.key === "ArrowLeft") move(1);
+      if (event.key === "ArrowRight") move(-1);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [index, gallery]);
   const [zoom, setZoom] = useState(100),
     [crop, setCrop] = useState({ left: 0, top: 0, width: 500, height: 500 }),
     [cropped, setCropped] = useState<string | null>(null);
@@ -984,6 +1081,27 @@ function MediaViewer({
       title={media.origin === "source" ? "תמונת המקור" : "הגלריה שלי"}
       close={close}
     >
+      <nav className="k-media-navigation" aria-label="דפדוף בגלריה">
+        <button
+          className="button outline"
+          disabled={items.length < 2}
+          onClick={() => move(-1)}
+          aria-label="התמונה הקודמת"
+        >
+          →
+        </button>
+        <span>
+          {index + 1} / {items.length}
+        </span>
+        <button
+          className="button outline"
+          disabled={items.length < 2}
+          onClick={() => move(1)}
+          aria-label="התמונה הבאה"
+        >
+          ←
+        </button>
+      </nav>
       {media.kind === "image" ? (
         <>
           <label>
@@ -997,7 +1115,20 @@ function MediaViewer({
               onChange={(e) => setZoom(Number(e.target.value))}
             />
           </label>
-          <div className="k-zoom">
+          <div
+            className="k-zoom"
+            onTouchStart={(event) => {
+              if (zoom === 100 && event.touches.length === 1)
+                setTouchX(event.touches[0].clientX);
+            }}
+            onTouchEnd={(event) => {
+              if (touchX !== null && zoom === 100) {
+                const delta = event.changedTouches[0].clientX - touchX;
+                if (Math.abs(delta) > 60) move(delta < 0 ? 1 : -1);
+              }
+              setTouchX(null);
+            }}
+          >
             <img
               src={mediaUrl(media.id, "original")}
               alt={media.caption || "מקור המתכון"}

@@ -11,9 +11,13 @@ import {
 } from "../shared/measurements.ts";
 import { parseNumber } from "../shared/quantities.ts";
 import { normalize } from "../shared/planning.ts";
+import {
+  resolveCategoryPath,
+  type CategoryRedirect,
+} from "../shared/category-paths.ts";
 export async function getRecipe(tx: Db, id: string) {
   const r = await tx.query(
-    "select r.*,coalesce((select m.id from kitchen.media m where m.id=r.primary_media_id and m.state='ready'),(select m.id from kitchen.recipe_media rm join kitchen.media m on m.id=rm.media_id where rm.recipe_id=r.id and m.kind='image' and m.state='ready' order by rm.position,m.created_at limit 1)) as primary_media_id,coalesce((select jsonb_agg(category_id) from kitchen.recipe_categories where recipe_id=r.id),'[]') as category_ids from kitchen.recipes r where id=$1",
+    "select r.*,r.primary_media_id as stored_primary_media_id,coalesce((select m.id from kitchen.media m where m.id=r.primary_media_id and m.state='ready'),(select m.id from kitchen.recipe_media rm join kitchen.media m on m.id=rm.media_id where rm.recipe_id=r.id and m.kind='image' and m.state='ready' order by rm.position,m.created_at limit 1)) as primary_media_id,coalesce((select jsonb_agg(category_id) from kitchen.recipe_categories where recipe_id=r.id),'[]') as category_ids from kitchen.recipes r where id=$1",
     [id],
   );
   const row = requireValue(r.rows[0], "המתכון לא נמצא");
@@ -184,9 +188,17 @@ export async function saveRecipe(
 }
 export async function categoryPaths(tx: Db, paths: string[][]) {
   await tx.query("select pg_advisory_xact_lock(746822)");
+  const categories = (await tx.query("select * from kitchen.categories")).rows;
+  const redirects: CategoryRedirect[] =
+    (
+      await tx.query(
+        "select preferences->'category_path_redirects' redirects from kitchen.owner where id=1",
+      )
+    ).rows[0]?.redirects ?? [];
   const result: string[] = [];
   let created = 0;
-  for (const path of paths) {
+  for (const input of paths) {
+    const path = resolveCategoryPath(categories, redirects, input);
     if (!path.length || path.length > 8)
       throw new HttpError(400, "מסלול קטגוריה חייב לכלול 1–8 רמות");
     let parent: string | null = null;
@@ -205,6 +217,13 @@ export async function categoryPaths(tx: Db, paths: string[][]) {
           "insert into kitchen.categories(id,parent_id,name,normalized_name) values($1,$2,$3,$4)",
           [id, parent, name, normalize(name)],
         );
+        categories.push({
+          id,
+          parent_id: parent,
+          name,
+          normalized_name: normalize(name),
+          aliases: [],
+        });
         await enqueue(tx, "ai", "categoryImage", `category-image:${id}:1`, {
           category_id: id,
           image_revision: 1,
@@ -219,8 +238,15 @@ export async function categoryPaths(tx: Db, paths: string[][]) {
 }
 export async function categoryPreview(tx: Db, paths: string[][]) {
   const categories = (await tx.query("select * from kitchen.categories")).rows;
+  const redirects: CategoryRedirect[] =
+    (
+      await tx.query(
+        "select preferences->'category_path_redirects' redirects from kitchen.owner where id=1",
+      )
+    ).rows[0]?.redirects ?? [];
   const newPaths = new Set<string>();
-  for (const path of paths) {
+  for (const input of paths) {
+    const path = resolveCategoryPath(categories, redirects, input);
     let parent: string | null = null;
     let missing = false;
     const full: string[] = [];

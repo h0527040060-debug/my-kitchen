@@ -86,7 +86,7 @@ export async function registerMedia(
     kind = "audio";
   } else throw new HttpError(400, "נדרש קובץ תמונה, סרטון או הקלטה");
   const id = randomUUID(),
-    key = `original/${digest}`;
+    key = `original/${origin}/${digest}`;
   await objectStore.put(key, bytes, actualMime);
   const r = await tx.query(
     "insert into kitchen.media(id,object_key,digest,mime,bytes,kind,origin,metadata) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(digest,origin) do update set digest=excluded.digest returning *",

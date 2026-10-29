@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 import sharp from "sharp";
+import pg from "pg";
+import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { recipe } from "../tests/fixture.ts";
 let worker: ChildProcess;
@@ -44,18 +46,26 @@ test("mobile owner creates a real server recipe and preserves a cooking checklis
   await editor.getByLabel("שם המתכון", { exact: true }).fill(title);
   await editor.getByLabel("כמות בסיס", { exact: true }).fill("5");
   await editor.getByLabel("יחידת תפוקה", { exact: true }).fill("מנות");
+  await editor.getByRole("tab", { name: /מצרכים/ }).click();
   await editor.getByRole("button", { name: "מצרך", exact: true }).click();
   await editor.getByLabel("שם", { exact: true }).fill("קמח");
   await editor.getByRole("textbox", { name: "כמות", exact: true }).fill("2");
   await editor.getByLabel("יחידה", { exact: true }).fill("ק״ג");
+  await editor.getByRole("tab", { name: /הכנה/ }).click();
   await editor.getByRole("button", { name: "שלב", exact: true }).click();
   await editor
     .getByLabel("הוראות", { exact: true })
     .fill(
       "ללוש בצק. לאפות 30 דקות ב־180 מעלות. זו שורת טקסט ארוכה כדי לבחון גלישת עברית במסך צר ולוודא שכל המידע נשאר קריא.",
     );
+  await editor
+    .locator(".k-editor-extra")
+    .filter({ hasText: /^קטגוריות/ })
+    .locator("summary")
+    .click();
   await editor.getByRole("checkbox", { name: "בישול", exact: true }).check();
   await page.setViewportSize({ width: 390, height: 480 });
+  await editor.getByRole("tab", { name: "עוד", exact: true }).click();
   await editor.getByLabel("הערות וטיפים", { exact: true }).focus();
   await editor
     .getByRole("button", { name: "אישור ושמירת מתכון", exact: true })
@@ -94,7 +104,12 @@ test("private source gallery, server thumbnails, image zoom and mobile navigatio
 }) => {
   test.skip(!recipeId, "requires creation test");
   const bytes = await sharp({
-    create: { width: 1200, height: 1800, channels: 3, background: "#9d7450" },
+    create: {
+      width: 1200,
+      height: 1800,
+      channels: 3,
+      background: "#" + randomBytes(3).toString("hex"),
+    },
   })
     .png()
     .toBuffer();
@@ -117,7 +132,7 @@ test("private source gallery, server thumbnails, image zoom and mobile navigatio
     ).ok(),
   ).toBe(true);
   await page.goto("/#/recipes/" + recipeId);
-  await page.getByRole("button", { name: "פתיחת מדיה", exact: true }).click();
+  await page.getByRole("button", { name: /פתיחת כל הגלריה/ }).click();
   await expect(page.getByRole("dialog", { name: "הגלריה שלי" })).toBeVisible();
   const zoom = page.getByRole("slider");
   await zoom.fill("200");
@@ -146,6 +161,160 @@ test("private source gallery, server thumbnails, image zoom and mobile navigatio
     path: "test-results/mobile-settings.png",
     fullPage: true,
   });
+});
+test("AI main image and original are paired above the fold, gallery pages and compact editor retains detail fields", async ({
+  page,
+}) => {
+  test.skip(!recipeId, "requires creation test");
+  const current = await (
+    await page.request.get(`/api/recipes/${recipeId}`)
+  ).json();
+  const source = current.media[0];
+  const databaseUrl = process.env.DATABASE_URL!;
+  expect(new URL(databaseUrl).pathname).toBe("/kitchen_test");
+  const pool = new pg.Pool({ connectionString: databaseUrl, ssl: false });
+  try {
+    await pool.query("update kitchen.media set origin='source' where id=$1", [
+      source.id,
+    ]);
+  } finally {
+    await pool.end();
+  }
+  const art = await sharp({
+    create: {
+      width: 600,
+      height: 600,
+      channels: 3,
+      background: "#" + randomBytes(3).toString("hex"),
+    },
+  })
+    .webp()
+    .toBuffer();
+  const upload = await page.request.post("/api/media/illustrations", {
+    multipart: {
+      file: { name: "synthetic-ai.webp", mimeType: "image/webp", buffer: art },
+      provenance: JSON.stringify({
+        generator: "chatgpt_image_tool",
+        model: "synthetic test",
+        prompt_version: "synthetic-v1",
+        atlas_sha256: "b".repeat(64),
+        tile_index: 0,
+        recipe_id: recipeId,
+        recipe_revision: current.recipe.revision,
+        source_media_ids: [source.id],
+        prompt: "Synthetic test only",
+      }),
+    },
+  });
+  expect(upload.ok()).toBe(true);
+  const generated = await upload.json();
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get(`/api/media/${generated.id}`)).json())
+          .state,
+    )
+    .toBe("ready");
+  expect(
+    (
+      await page.request.post(`/api/recipes/${recipeId}/media`, {
+        data: {
+          media_id: generated.id,
+          primary: true,
+          position: 1,
+          expected_revision: current.recipe.revision,
+          expected_primary_media_id: null,
+        },
+      })
+    ).ok(),
+  ).toBe(true);
+  await page.goto(`/#/recipes/${recipeId}`);
+  const pair = page.getByRole("region", { name: "תמונת המנה והמקור" });
+  await expect(
+    pair.getByRole("button", { name: "פתיחת המקור", exact: true }),
+  ).toBeVisible();
+  const ai = pair.getByRole("button", {
+    name: "פתיחת תמונת המחשה באמצעות AI",
+    exact: true,
+  });
+  const b = await ai.boundingBox();
+  expect(b!.y + b!.height).toBeLessThan(844);
+  const boxes = await pair.locator(".k-recipe-media-card").evaluateAll((els) =>
+    els.map((e) => ({
+      y: e.getBoundingClientRect().y,
+      w: e.getBoundingClientRect().width,
+    })),
+  );
+  expect(Math.abs(boxes[0].y - boxes[1].y)).toBeLessThan(1);
+  expect(boxes[0].w).toBeLessThan(195);
+  await page.screenshot({
+    path: "test-results/mobile-paired-gallery.png",
+    fullPage: true,
+  });
+  await ai.click();
+  await expect(page.locator(".k-zoom img")).toHaveAttribute(
+    "src",
+    new RegExp(generated.id),
+  );
+  await page.getByRole("button", { name: "התמונה הבאה", exact: true }).click();
+  await expect(page.locator(".k-zoom img")).toHaveAttribute(
+    "src",
+    new RegExp(source.id),
+  );
+  const cdp = await page.context().newCDPSession(page);
+  const imageBox = await page.locator(".k-zoom").boundingBox();
+  const swipeY = Math.min(imageBox!.y + 60, 650);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: 250, y: swipeY }],
+  });
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{ x: 70, y: swipeY }],
+  });
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await cdp.detach();
+  await expect(page.locator(".k-zoom img")).toHaveAttribute(
+    "src",
+    new RegExp(generated.id),
+  );
+  await page.getByRole("button", { name: "סגירה", exact: true }).click();
+  await page.getByRole("button", { name: "עריכה", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: /עריכת/ });
+  await editor.getByRole("tab", { name: /מצרכים/ }).click();
+  await editor.locator(".k-ingredient-details summary").first().click();
+  await editor
+    .getByLabel("הערת הכנה", { exact: true })
+    .first()
+    .fill("מנופה — בדיקת שמירת שדה מקופל");
+  await editor.locator(".k-ingredient-details summary").first().click();
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 480 });
+    expect(
+      await editor.evaluate((e) => e.scrollWidth <= e.clientWidth + 1),
+    ).toBe(true);
+  }
+  await page.screenshot({
+    path: "test-results/mobile-compact-editor.png",
+    fullPage: true,
+  });
+  await editor.getByRole("tab", { name: "פרטים", exact: true }).click();
+  await editor
+    .getByRole("button", { name: "אישור ושמירת מתכון", exact: true })
+    .click();
+  await expect(editor).not.toBeVisible();
+  const saved = await (
+    await page.request.get(`/api/recipes/${recipeId}`)
+  ).json();
+  expect(saved.recipe.content.ingredients[0].note).toBe(
+    "מנופה — בדיקת שמירת שדה מקופל",
+  );
+  expect(
+    saved.media.some((m: any) => m.id === source.id && m.origin === "source"),
+  ).toBe(true);
 });
 test("unverified browser cannot access media or charge AI", async ({
   browser,

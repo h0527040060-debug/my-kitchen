@@ -4,6 +4,7 @@ import { emptyRecipe } from "../shared/model.ts";
 import { ingredient } from "./fixture.ts";
 import { suggestCategoryPaths } from "../shared/category-suggestions.ts";
 import { categoryTheme } from "../shared/category-themes.ts";
+import { resolveCategoryPath } from "../shared/category-paths.ts";
 test("classification checks ingredients and preparation and distinguishes no-bake cheesecake", () => {
   const c = {
     ...emptyRecipe(),
@@ -31,4 +32,28 @@ test("classification checks ingredients and preparation and distinguishes no-bak
   );
   assert.equal(categoryTheme(["בישול", "מנות כבד"]).tile, 14);
   assert.equal(categoryTheme(["בישול", "ממרחים"]).pack, "extra");
+});
+test("approved historical category paths follow merged branches and preserve a new child without creating a duplicate parent", () => {
+  const categories = [
+    { id: "a", name: "אפייה", parent_id: null },
+    { id: "b", name: "מאפים מלוחים", parent_id: "a" },
+    { id: "p", name: "פיצות", parent_id: "b" },
+  ];
+  const redirects = [{ from: ["אפייה", "פיצה"], to_category_id: "p" }];
+  assert.deepEqual(
+    resolveCategoryPath(categories, redirects, ["אפייה", "פיצה"]),
+    ["אפייה", "מאפים מלוחים", "פיצות"],
+  );
+  assert.deepEqual(
+    resolveCategoryPath(categories, redirects, ["אפייה", "פיצה", "ללא גלוטן"]),
+    ["אפייה", "מאפים מלוחים", "פיצות", "ללא גלוטן"],
+  );
+  assert.deepEqual(
+    resolveCategoryPath(
+      categories,
+      [{ from: ["ישן"], to_category_id: "missing" }],
+      ["ישן"],
+    ),
+    ["ישן"],
+  );
 });
