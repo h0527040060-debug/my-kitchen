@@ -36,7 +36,12 @@ export async function api<T = any>(
       data.details,
     );
   }
-  return response.json();
+  const result = await response.json();
+  if (method !== "GET" && (
+    (/^\/recipes(?:\/|$)/.test(path) && !path.endsWith("/favorite")) ||
+    path.startsWith("/recipe-collection/")
+  )) window.dispatchEvent(new Event("kitchen-recipes-changed"));
+  return result;
 }
 export async function upload(file: File, path = "/media") {
   const form = new FormData();
