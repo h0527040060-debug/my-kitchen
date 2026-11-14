@@ -13,6 +13,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { api, go } from "./api.ts";
+import { useKitchenNavigation } from "./navigation.ts";
 import { NoticeContext, useAction, LoadState } from "./ui.tsx";
 import { RecipeHome, RecipeDetail } from "./recipes.tsx";
 import { Imports } from "./imports.tsx";
@@ -42,8 +43,17 @@ export default function KitchenApp() {
   const [session, setSession] = useState<any>(null),
     [ready, setReady] = useState(false),
     [error, setError] = useState(""),
-    [notice, setNotice] = useState(""),
-    [route, setRoute] = useState(window.location.hash.slice(1) || "/recipes");
+    [notice, setNotice] = useState("");
+  const { route, back } = useKitchenNavigation();
+  const isLibraryRoute = (path: string) => path.split("?")[0] === "/recipes";
+  const [libraryRoute, setLibraryRoute] = useState<string | null>(
+    isLibraryRoute(route) ? route : null,
+  );
+  const libraryVisible = isLibraryRoute(route);
+  const retainedLibraryRoute = libraryVisible ? route : libraryRoute;
+  useEffect(() => {
+    if (libraryVisible) setLibraryRoute(route);
+  }, [route, libraryVisible]);
   useEffect(() => {
     let active = true;
     api("/session")
@@ -56,16 +66,10 @@ export default function KitchenApp() {
       .finally(() => {
         if (active) setReady(true);
       });
-    const change = () => {
-      setRoute(window.location.hash.slice(1) || "/recipes");
-      window.scrollTo({ top: 0 });
-    };
     const logout = () => setSession(null);
-    window.addEventListener("hashchange", change);
     window.addEventListener("kitchen-signed-out", logout);
     return () => {
       active = false;
-      window.removeEventListener("hashchange", change);
       window.removeEventListener("kitchen-signed-out", logout);
     };
   }, []);
@@ -100,10 +104,8 @@ export default function KitchenApp() {
     content =
       tab === "recipes" ? (
         id ? (
-          <RecipeDetail key={id} id={id} />
-        ) : (
-          <RecipeHome key={route} />
-        )
+          <RecipeDetail key={id} id={id} back={back} />
+        ) : null
       ) : tab === "imports" ? (
         <Imports />
       ) : tab === "cook" && id ? (
@@ -182,6 +184,15 @@ export default function KitchenApp() {
         </header>
         <InstallPrompt />
         <main id="k-main" className="k-main">
+          {ready && session && retainedLibraryRoute !== null && (
+            <div hidden={!libraryVisible}>
+              <RecipeHome
+                key={retainedLibraryRoute}
+                route={retainedLibraryRoute}
+                active={libraryVisible}
+              />
+            </div>
+          )}
           {content}
         </main>
         {session && (

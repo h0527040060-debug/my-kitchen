@@ -30,7 +30,10 @@ import {
   panRatio,
   selectedIngredient,
 } from "../../shared/quantities.ts";
-export function RecipeHome() {
+export function RecipeHome({
+  active = true,
+  route = window.location.hash.slice(1) || "/recipes",
+}: { active?: boolean; route?: string }) {
   const [q, setQ] = useState(""),
     [query, setQuery] = useState(""),
     [category, setCategory] = useState(""),
@@ -46,7 +49,7 @@ export function RecipeHome() {
       max_total: "",
     }),
     [editing, setEditing] = useState(
-      new URLSearchParams(window.location.hash.split("?")[1] ?? "").has("new"),
+      new URLSearchParams(route.split("?")[1] ?? "").has("new"),
     );
 
   const [selection, setSelection] = useState<any[]>([]),
@@ -58,11 +61,11 @@ export function RecipeHome() {
     sort,
     favorite: String(favorite),
     ...(category ? { category } : {}),
-    ...(new URLSearchParams(window.location.hash.split("?")[1] ?? "").get(
+    ...(new URLSearchParams(route.split("?")[1] ?? "").get(
       "source",
     )
       ? {
-          source: new URLSearchParams(window.location.hash.split("?")[1]).get(
+          source: new URLSearchParams(route.split("?")[1]).get(
             "source",
           )!,
         }
@@ -85,13 +88,14 @@ export function RecipeHome() {
     cooking = useResource<any>("/cooking");
   const { run, busy, notify } = useAction();
   useEffect(() => {
-    const add = () => setEditing(true);
+    const add = () => { if (active) setEditing(true); };
     window.addEventListener("kitchen-add-recipe", add);
     return () => window.removeEventListener("kitchen-add-recipe", add);
-  }, []);
+  }, [active]);
   const sentinel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (
+      !active ||
       !sentinel.current ||
       loading ||
       loadingMore ||
@@ -108,7 +112,7 @@ export function RecipeHome() {
     );
     observer.observe(sentinel.current);
     return () => observer.disconnect();
-  }, [loading, loadingMore, error, hasMore, loadMore]);
+  }, [active, loading, loadingMore, error, hasMore, loadMore]);
   return (
     <div className="k-library-page">
       <h1 className="k-sr-only">המתכונים שלי</h1>
@@ -446,7 +450,7 @@ export function RecipeHome() {
           </div>
         </>
       )}
-      {remove && (
+      {remove && active && (
         <Confirm
           close={() => setRemove(null)}
           text={
@@ -469,7 +473,7 @@ export function RecipeHome() {
           }}
         />
       )}
-      {editing && (
+      {editing && active && (
         <RecipeEditor
           close={() => setEditing(false)}
           saved={(id) => {
@@ -481,7 +485,10 @@ export function RecipeHome() {
     </div>
   );
 }
-export function RecipeDetail({ id }: { id: string }) {
+export function RecipeDetail({
+  id,
+  back = () => go("/recipes"),
+}: { id: string; back?: () => void }) {
   const settings = useResource<any>("/settings");
   const { data, error, loading, reload } = useResource<any>(
     "/recipes/" + id,
@@ -509,7 +516,7 @@ export function RecipeDetail({ id }: { id: string }) {
       <PageTitle
         title={c.title || "מתכון ללא שם"}
         subtitle={`גרסה ${r.revision} · ${r.status === "published" ? "מתכון שמור במאגר" : r.status === "trash" ? "בסל המחזור" : "טיוטה — עדיין לא מאושרת"}`}
-        back={() => go("/recipes")}
+        back={back}
       >
         <button className="button outline" onClick={() => setEditing(true)}>
           עריכה
