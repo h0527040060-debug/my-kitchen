@@ -8,6 +8,7 @@ const recipes = Array.from({ length: 65 }, (_, n) => ({
   revision: 1, status: "published", favorite: false, primary_media_id: null,
 }));
 async function kitchen(page: Page) {
+  const currentRecipes = recipes.map(r => ({ ...r }));
   const requests: URL[] = [];
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -24,11 +25,16 @@ async function kitchen(page: Page) {
     if (path === "/api/recipes") {
       requests.push(url);
       const offset = Number(url.searchParams.get("offset"));
-      return route.fulfill({ json: { items: recipes.slice(offset, offset + 24), total: recipes.length } });
+      return route.fulfill({ json: { items: currentRecipes.slice(offset, offset + 24), total: currentRecipes.length } });
     }
     const id = path.match(/^\/api\/recipes\/([^/]+)$/)?.[1];
     if (id) {
-      const recipe = recipes.find(r => r.id === id)!;
+      const recipe = currentRecipes.find(r => r.id === id)!;
+      if (request.method() === "PUT") {
+        recipe.title = request.postDataJSON().content.title;
+        recipe.revision++;
+        return route.fulfill({ json: { id: recipe.id } });
+      }
       return route.fulfill({ json: {
         recipe: { ...recipe, content: { ...emptyRecipe(), title: recipe.title }, category_ids: [] },
         media: [], experiences: [], versions: [],
@@ -117,5 +123,29 @@ test("a direct recipe link has a safe back destination", async ({ page }) => {
   await expect(page).toHaveURL(/#\/recipes$/);
   await expect(page.locator(".k-card")).toHaveCount(24);
   await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test("saving an edited recipe refreshes the retained list and restores its deep position", async ({ page }) => {
+  const { errors } = await kitchen(page);
+  await page.goto("/");
+  await expect(page.locator(".k-card")).toHaveCount(24);
+  await page.locator(".k-feed-footer").scrollIntoViewIfNeeded();
+  await expect(page.locator(".k-card")).toHaveCount(48);
+  const card = page.locator(".k-card-photo").nth(31);
+  await card.scrollIntoViewIfNeeded();
+  const position = await page.evaluate(() => scrollY);
+  await card.click();
+  await expect(page.getByRole("heading", { name: recipes[31].title, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "עריכה", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "עריכת מתכון", exact: true });
+  const editedTitle = "מתכון מעודכן — נתוני בדיקת חזרה";
+  await editor.getByLabel("שם המתכון", { exact: true }).fill(editedTitle);
+  await editor.getByRole("button", { name: "אישור ושמירת מתכון", exact: true }).click();
+  await expect(editor).not.toBeVisible();
+  await expect(page.getByRole("heading", { name: editedTitle, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "חזרה", exact: true }).click();
+  await expect(page.getByRole("button", { name: "פתיחת " + editedTitle, exact: true })).toBeVisible();
+  await expect.poll(async () => Math.abs(await page.evaluate(() => scrollY) - position)).toBeLessThanOrEqual(2);
   expect(errors).toEqual([]);
 });

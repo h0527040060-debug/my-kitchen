@@ -88,6 +88,10 @@ export function RecipeHome({
     cooking = useResource<any>("/cooking");
   const { run, busy, notify } = useAction();
   useEffect(() => {
+    window.addEventListener("kitchen-recipes-changed", reload);
+    return () => window.removeEventListener("kitchen-recipes-changed", reload);
+  }, [reload]);
+  useEffect(() => {
     const add = () => { if (active) setEditing(true); };
     window.addEventListener("kitchen-add-recipe", add);
     return () => window.removeEventListener("kitchen-add-recipe", add);
