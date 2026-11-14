@@ -52,7 +52,13 @@ export function useResource<T = any>(path: string | null, poll = 0) {
       if (inFlight) return;
       inFlight = true;
       try {
-        const result = await api<T>(path!);
+        const result = await api<T>(
+          path!,
+          "GET",
+          undefined,
+          undefined,
+          controller.signal,
+        );
         if (active) {
           setData(result);
           setError("");
@@ -89,9 +95,28 @@ export function LoadState({
   error: string;
   retry: () => void;
 }) {
+  const [slow, setSlow] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    setSlow(false);
+    if (!loading) return;
+    const timer = window.setTimeout(() => setSlow(true), 8000);
+    return () => window.clearTimeout(timer);
+  }, [loading, attempt]);
   return loading ? (
     <div className="k-empty" role="status">
-      פותחים את המטבח…
+      <span>{slow ? "הטעינה מתעכבת…" : "פותחים את המטבח…"}</span>
+      {slow && (
+        <button
+          className="button outline"
+          onClick={() => {
+            setAttempt((n) => n + 1);
+            retry();
+          }}
+        >
+          טעינה מחדש
+        </button>
+      )}
     </div>
   ) : error ? (
     <div className="k-alert" role="alert">

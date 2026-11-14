@@ -44,6 +44,7 @@ export default function KitchenApp() {
     [ready, setReady] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
+  const [sessionAttempt, setSessionAttempt] = useState(0);
   const { route, back } = useKitchenNavigation();
   const isLibraryRoute = (path: string) => path.split("?")[0] === "/recipes";
   const [libraryRoute, setLibraryRoute] = useState<string | null>(
@@ -56,7 +57,10 @@ export default function KitchenApp() {
   }, [route, libraryVisible]);
   useEffect(() => {
     let active = true;
-    api("/session")
+    const controller = new AbortController();
+    setReady(false);
+    setError("");
+    api("/session", "GET", undefined, undefined, controller.signal)
       .then((s) => {
         if (active) setSession(s);
       })
@@ -70,9 +74,10 @@ export default function KitchenApp() {
     window.addEventListener("kitchen-signed-out", logout);
     return () => {
       active = false;
+      controller.abort();
       window.removeEventListener("kitchen-signed-out", logout);
     };
-  }, []);
+  }, [sessionAttempt]);
   useEffect(() => {
     document
       .querySelector('meta[name="theme-color"]')
@@ -97,7 +102,14 @@ export default function KitchenApp() {
   }, [notice]);
   const [tab, id] = route.split("?")[0].split("/").filter(Boolean);
   let content;
-  if (!ready) content = <LoadState loading error="" retry={() => {}} />;
+  if (!ready || (error && !session))
+    content = (
+      <LoadState
+        loading={!ready}
+        error={error}
+        retry={() => setSessionAttempt((n) => n + 1)}
+      />
+    );
   else if (!session)
     content = <Login connected={setSession} serverError={error} />;
   else

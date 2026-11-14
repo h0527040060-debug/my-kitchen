@@ -14,34 +14,57 @@ export async function api<T = any>(
   key?: string,
   signal?: AbortSignal,
 ): Promise<T> {
-  const response = await fetch("/api" + path, {
-    method,
-    credentials: "same-origin",
-    signal,
-    headers: {
-      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      ...(key ? { "Idempotency-Key": key } : {}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const data = await response
-      .json()
-      .catch(() => ({ error: "השרת אינו זמין כרגע" }));
-    if (response.status === 401)
-      window.dispatchEvent(new Event("kitchen-signed-out"));
-    throw new ApiError(
-      data.error || "הפעולה נכשלה",
-      response.status,
-      data.details,
-    );
+  const controller = method === "GET" ? new AbortController() : null;
+  let timedOut = false;
+  const cancel = () => controller?.abort();
+  if (signal?.aborted) cancel();
+  else signal?.addEventListener("abort", cancel, { once: true });
+  // Include response-body reads in the deadline, including through a service worker.
+  const timeout = controller
+    ? window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, 25_000)
+    : undefined;
+  try {
+    const response = await fetch("/api" + path, {
+      method,
+      credentials: "same-origin",
+      signal: controller?.signal ?? signal,
+      headers: {
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(key ? { "Idempotency-Key": key } : {}),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const data = await response
+        .json()
+        .catch(() => ({ error: "השרת אינו זמין כרגע" }));
+      if (response.status === 401)
+        window.dispatchEvent(new Event("kitchen-signed-out"));
+      throw new ApiError(
+        data.error || "הפעולה נכשלה",
+        response.status,
+        data.details,
+      );
+    }
+    const result = await response.json();
+    if (
+      method !== "GET" &&
+      ((/^\/recipes(?:\/|$)/.test(path) && !path.endsWith("/favorite")) ||
+        path.startsWith("/recipe-collection/"))
+    )
+      window.dispatchEvent(new Event("kitchen-recipes-changed"));
+    return result;
+  } catch (error) {
+    if (timedOut && !signal?.aborted)
+      throw new ApiError("הטעינה התעכבה. אפשר לנסות שוב.", 408);
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+    signal?.removeEventListener("abort", cancel);
   }
-  const result = await response.json();
-  if (method !== "GET" && (
-    (/^\/recipes(?:\/|$)/.test(path) && !path.endsWith("/favorite")) ||
-    path.startsWith("/recipe-collection/")
-  )) window.dispatchEvent(new Event("kitchen-recipes-changed"));
-  return result;
 }
 export async function upload(file: File, path = "/media") {
   const form = new FormData();
